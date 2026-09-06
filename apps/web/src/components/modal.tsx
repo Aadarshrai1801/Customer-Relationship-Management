@@ -5,20 +5,27 @@ import type { ReactNode } from 'react';
 export function Modal({
   open,
   onOpenChange,
+  onClose,
   title,
   description,
   size = 'md',
   children,
 }: {
   open: boolean;
-  onOpenChange: (open: boolean) => void;
+  onOpenChange?: (open: boolean) => void;
+  onClose?: () => void;
   title: string;
   description?: string;
   size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl';
   children: ReactNode;
 }): React.JSX.Element {
+  const handleOpenChange = (nextOpen: boolean) => {
+    onOpenChange?.(nextOpen);
+    if (!nextOpen) onClose?.();
+  };
+
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50 backdrop-blur-xs" />
         <Dialog.Content

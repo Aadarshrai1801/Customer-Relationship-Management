@@ -5,9 +5,11 @@ import { useTheme } from '../lib/theme';
 import { Button } from '../components/ui';
 import { useToast } from '../components/toast';
 import { CommandPalette } from './command-palette';
+import { NotificationsPopover } from './notifications-popover';
 
 const NAV: Array<{ to: string; label: string; scope?: string }> = [
   { to: '/', label: 'Home' },
+  { to: '/leads', label: 'Leads', scope: 'leads:read' },
   { to: '/contacts', label: 'Contacts', scope: 'contacts:read' },
   { to: '/accounts', label: 'Accounts', scope: 'accounts:read' },
   { to: '/duplicates', label: 'Duplicates', scope: 'contacts:read' },
@@ -67,6 +69,7 @@ export function Shell({ children }: { children: React.ReactNode }): React.JSX.El
             </nav>
           </div>
           <div className="flex items-center gap-2">
+            <NotificationsPopover />
             <CommandPalette />
             <span className="hidden text-xs text-text-secondary xl:block">
               {user?.name} · {org?.name}

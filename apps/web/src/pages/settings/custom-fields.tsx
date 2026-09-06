@@ -23,7 +23,7 @@ export function CustomFieldsAdminPage(): React.JSX.Element {
   const { notify } = useToast();
   const queryClient = useQueryClient();
 
-  const [entityType, setEntityType] = useState<'contact' | 'account'>('contact');
+  const [entityType, setEntityType] = useState<'contact' | 'account' | 'lead'>('contact');
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<CustomFieldDef | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CustomFieldDef | null>(null);
@@ -213,11 +213,22 @@ export function CustomFieldsAdminPage(): React.JSX.Element {
         >
           Account Custom Fields
         </button>
+        <button
+          type="button"
+          onClick={() => setEntityType('lead')}
+          className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+            entityType === 'lead'
+              ? 'bg-accent text-white'
+              : 'text-text-secondary hover:bg-surface-raised hover:text-text-primary'
+          }`}
+        >
+          Lead Custom Fields
+        </button>
       </div>
 
       {/* Fields List */}
       <Card
-        title={`${entityType === 'contact' ? 'Contact' : 'Account'} Field Definitions`}
+        title={`${entityType === 'contact' ? 'Contact' : entityType === 'account' ? 'Account' : 'Lead'} Field Definitions`}
         description="These fields are validated and rendered across list and detail pages."
       >
         {fieldsQuery.isLoading ? (

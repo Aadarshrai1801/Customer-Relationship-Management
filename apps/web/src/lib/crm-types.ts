@@ -19,7 +19,7 @@ export type CustomFieldType =
 
 export interface CustomFieldDef {
   id: string;
-  entityType: 'contact' | 'account';
+  entityType: 'contact' | 'account' | 'lead';
   key: string;
   label: string;
   type: CustomFieldType;
@@ -161,3 +161,96 @@ export interface UploadResponse {
   sampleRows: Array<Record<string, string>>;
   suggestedMapping: Record<string, string>;
 }
+
+export type LeadStatus = 'new' | 'contacted' | 'qualified' | 'unqualified' | 'converted';
+export type LeadSource = 'website' | 'referral' | 'event' | 'outbound' | 'campaign' | 'other';
+
+export interface SerializedLead {
+  id: string;
+  ownerId: string | null;
+  owner: { id: string; name: string } | null;
+  name: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string;
+  phone: string | null;
+  company: string | null;
+  title: string | null;
+  status: LeadStatus;
+  source: LeadSource;
+  utmSource: string | null;
+  utmMedium: string | null;
+  utmCampaign: string | null;
+  utmTerm: string | null;
+  utmContent: string | null;
+  referrerUrl: string | null;
+  notes: string | null;
+  customFields: Record<string, unknown>;
+  computedFields: Record<string, unknown>;
+  convertedAt: string | null;
+  convertedContactId: string | null;
+  convertedAccountId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  [key: string]: unknown;
+}
+
+export interface LeadAssignmentLog {
+  id: string;
+  leadId: string;
+  ruleId: string | null;
+  assignedToUserId: string;
+  assignedToUser?: { id: string; name: string; email: string } | null;
+  previousUserId: string | null;
+  previousUser?: { id: string; name: string; email: string } | null;
+  reason: string | null;
+  createdAt: string;
+}
+
+export interface RoutingMember {
+  id: string;
+  userId: string;
+  user: { id: string; name: string; email: string } | null;
+  orderIndex: number;
+  isActive: boolean;
+}
+
+export interface RoutingRule {
+  id: string;
+  name: string;
+  strategy: 'round_robin' | 'manual';
+  isActive: boolean;
+  fallbackUserId: string | null;
+  fallbackUser: { id: string; name: string; email: string } | null;
+  lastAssignedIndex: number;
+  members: RoutingMember[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RepAvailability {
+  userId: string;
+  isAvailable: boolean;
+  oooReason: string | null;
+  returnAt: string | null;
+}
+
+export interface AppNotification {
+  id: string;
+  orgId: string;
+  userId: string;
+  type: string;
+  title: string;
+  body: string;
+  link: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface WebToLeadSnippetResponse {
+  tenantToken: string;
+  formHtml: string;
+  endpointUrl: string;
+  fields: string[];
+}
+

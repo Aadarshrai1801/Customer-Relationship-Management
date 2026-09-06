@@ -30,6 +30,10 @@ import { AccountsListPage } from './pages/accounts/accounts-list';
 import { AccountDetailPage } from './pages/accounts/account-detail';
 import { DedupQueuePage } from './pages/duplicates/dedup-queue';
 import { ImportsWizardPage } from './pages/imports/imports-wizard';
+import { LeadsListPage } from './pages/leads/leads-list';
+import { LeadDetailPage } from './pages/leads/lead-detail';
+import { WebToLeadPage } from './pages/settings/web-to-lead';
+import { LeadRoutingPage } from './pages/settings/lead-routing';
 
 function ProtectedLayout(): React.JSX.Element {
   const { user, loading } = useAuth();
@@ -63,6 +67,31 @@ const homeRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/',
   component: HomePage,
+});
+
+// Module 3 Routes
+const leadsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/leads',
+  component: LeadsListPage,
+});
+
+const leadDetailRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/leads/$id',
+  component: LeadDetailPage,
+});
+
+const webToLeadRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/settings/web-to-lead',
+  component: WebToLeadPage,
+});
+
+const leadRoutingRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/settings/lead-routing',
+  component: LeadRoutingPage,
 });
 
 // Module 2 Routes
@@ -183,12 +212,16 @@ const ssoErrorRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   protectedRoute.addChildren([
     homeRoute,
+    leadsRoute,
+    leadDetailRoute,
     contactsRoute,
     contactDetailRoute,
     accountsRoute,
     accountDetailRoute,
     duplicatesRoute,
     importsRoute,
+    webToLeadRoute,
+    leadRoutingRoute,
     customFieldsRoute,
     profileRoute,
     securityRoute,
