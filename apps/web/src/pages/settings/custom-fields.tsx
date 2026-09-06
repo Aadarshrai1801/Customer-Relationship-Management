@@ -444,20 +444,20 @@ export function CustomFieldsAdminPage(): React.JSX.Element {
               <Field
                 label="Formula Expression *"
                 htmlFor="cf-formula"
-                hint="e.g. UPPER(title) or (score * 1.5) or CONCAT(first_name, ' ', last_name)"
+                hint="e.g. {score} * 1.5 or CONCAT({first_name}, ' ', {last_name}) or ROUND({amount} * 1.1, 2)"
               >
                 <Input
                   id="cf-formula"
-                  placeholder="salary * 1.1"
+                  placeholder="CONCAT({nickname}, ' (VIP)')"
                   value={formulaExpression}
                   onChange={(e) => setFormulaExpression(e.target.value)}
                 />
               </Field>
               <div className="text-[11px] text-text-secondary">
                 <span className="font-semibold text-text-primary">Supported Functions:</span>{' '}
-                <code>UPPER(x)</code>, <code>LOWER(x)</code>, <code>CONCAT(a, b)</code>,{' '}
-                <code>LEN(x)</code>, <code>IF(cond, a, b)</code>, <code>ROUND(x)</code>,{' '}
-                <code>ABS(x)</code>, arithmetic (<code>+ - * /</code>), logical (<code>AND OR !</code>).
+                <code>CONCAT(a, b, ...)</code>, <code>ROUND(x, dec)</code>,{' '}
+                <code>IF(cond, a, b)</code>, <code>MIN(a, b)</code>, <code>MAX(a, b)</code>.{' '}
+                Field references must be in braces: <code>&#123;field_key&#125;</code>.
               </div>
             </div>
           )}
