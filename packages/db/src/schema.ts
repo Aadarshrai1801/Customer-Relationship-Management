@@ -15,6 +15,7 @@ export interface OrganizationSecuritySettings {
 }
 
 export interface RolePermissions {
+  version: 1;
   scopes: string[];
   recordAccess: Record<string, 'all' | 'own'>;
   fields: Record<string, 'edit' | 'read' | 'none'>;
@@ -31,12 +32,6 @@ export const DEFAULT_ORGANIZATION_SECURITY_SETTINGS: OrganizationSecuritySetting
   ssoOnly: false,
   passwordMinLength: 12,
   sessionTtlDays: 14,
-};
-
-export const DEFAULT_ROLE_PERMISSIONS: RolePermissions = {
-  scopes: [],
-  recordAccess: {},
-  fields: {},
 };
 
 export const organizations = pgTable('organizations', {
@@ -68,7 +63,7 @@ export const roles = pgTable(
     permissions: jsonb('permissions')
       .$type<RolePermissions>()
       .notNull()
-      .default(DEFAULT_ROLE_PERMISSIONS),
+      .default({ version: 1, scopes: [], recordAccess: {}, fields: {} } as RolePermissions),
     isSystem: boolean('is_system').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

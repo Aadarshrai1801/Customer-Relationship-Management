@@ -88,7 +88,7 @@ export class SessionService {
           status: user.status,
           roleId: user.roleId,
         },
-        role: { id: role.id, key: role.key, name: role.name },
+        role: { id: role.id, key: role.key, name: role.name, permissions: role.permissions },
         org: { id: org.id, name: org.name, slug: org.slug },
         sessionMeta: {
           createdAt: session.createdAt,
@@ -103,7 +103,12 @@ export class SessionService {
     return {
       sessionId: context.sessionId,
       user: context.user,
-      role: context.role,
+      role: {
+        id: context.role.id,
+        key: context.role.key,
+        name: context.role.name,
+        permissions: context.role.permissions,
+      },
       org: context.org,
     };
   }

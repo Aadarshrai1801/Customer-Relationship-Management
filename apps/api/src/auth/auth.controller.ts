@@ -14,6 +14,7 @@ import {
 import type { Request, Response } from 'express';
 import { Public } from '../common/public.decorator';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { RequireScopes } from '../rbac/require-scopes.decorator';
 import { AuthService } from './auth.service';
 import {
   acceptInviteSchema,
@@ -105,6 +106,7 @@ export class AuthController {
     return { ok: true };
   }
 
+  @RequireScopes('users:invite')
   @Post('invites')
   async createInvite(
     @Body(new ZodValidationPipe(createInviteSchema)) body: unknown,
@@ -114,6 +116,7 @@ export class AuthController {
     return this.auth.createInvite(req.auth, body as CreateInviteInput);
   }
 
+  @RequireScopes('users:read')
   @Get('invites')
   async listInvites(@Req() req: Request): Promise<unknown> {
     if (!req.auth) throw new UnauthorizedException();

@@ -12,7 +12,6 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import {
   DEFAULT_ORGANIZATION_SECURITY_SETTINGS,
   DEFAULT_ORGANIZATION_SETTINGS,
-  DEFAULT_ROLE_PERMISSIONS,
   emailInvites,
   organizations,
   passwordResetTokens,
@@ -25,6 +24,7 @@ import {
 } from '@nexus/db';
 import { IdentityDb, TenantDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
+import { SYSTEM_ROLE_SEEDS } from '../rbac/seeds';
 import { PasswordService } from './password.service';
 import { SessionService, type CreatedSession } from './session.service';
 import { MailService } from './mail.service';
@@ -44,7 +44,7 @@ export interface PublicUser {
   email: string;
   name: string;
   status: string;
-  role: { id: string; key: string; name: string };
+  role: { id: string; key: string; name: string; permissions?: unknown };
 }
 
 export interface PublicOrg {
@@ -55,17 +55,6 @@ export interface PublicOrg {
 
 const RESET_TTL_MS = 60 * 60 * 1000;
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-
-// TODO(PR3): replace inline role checks with the RBAC guard + @Scopes metadata.
-const INVITE_ALLOWED_ROLES = new Set(['owner', 'admin']);
-
-const SYSTEM_ROLES: Array<{ key: string; name: string }> = [
-  { key: 'owner', name: 'Owner' },
-  { key: 'admin', name: 'Admin' },
-  { key: 'manager', name: 'Manager' },
-  { key: 'rep', name: 'Sales Rep' },
-  { key: 'viewer', name: 'Viewer' },
-];
 
 @Injectable()
 export class AuthService {
@@ -92,11 +81,11 @@ export class AuthService {
     const [org] = await this.identityDb.db.insert(organizations).values(orgRow).returning();
     if (!org) throw new Error('Failed to create organization');
 
-    const seedRoles: NewRole[] = SYSTEM_ROLES.map((r) => ({
+    const seedRoles: NewRole[] = SYSTEM_ROLE_SEEDS.map((r) => ({
       orgId: org.id,
       key: r.key,
       name: r.name,
-      permissions: DEFAULT_ROLE_PERMISSIONS,
+      permissions: r.permissions,
       isSystem: true,
     }));
     const createdRoles = await this.identityDb.db.insert(roles).values(seedRoles).returning();
@@ -203,7 +192,12 @@ export class AuthService {
         email: auth.user.email,
         name: auth.user.name,
         status: auth.user.status,
-        role: { id: auth.role.id, key: auth.role.key, name: auth.role.name },
+        role: {
+          id: auth.role.id,
+          key: auth.role.key,
+          name: auth.role.name,
+          permissions: auth.role.permissions,
+        },
       },
       org: auth.org,
     };
@@ -286,13 +280,6 @@ export class AuthService {
     auth: AuthContext,
     input: CreateInviteInput,
   ): Promise<{ id: string; email: string; roleKey: string; expiresAt: Date }> {
-    if (!INVITE_ALLOWED_ROLES.has(auth.role.key)) {
-      throw new ForbiddenException({
-        message: 'Only owners and admins can invite users',
-        code: 'INVITE_FORBIDDEN',
-      });
-    }
-
     return this.tenantDb.tx(auth.org.id, async (db) => {
       const [role] = await db
         .select()

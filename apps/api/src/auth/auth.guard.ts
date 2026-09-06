@@ -9,6 +9,8 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { IS_PUBLIC_KEY } from '../common/public.decorator';
+import { REQUIRED_SCOPES_KEY } from '../rbac/require-scopes.decorator';
+import { hasScope } from '../rbac/permissions';
 import { SESSION_COOKIE_NAME } from './tokens';
 import { SessionService } from './session.service';
 
@@ -37,6 +39,19 @@ export class AuthGuard implements CanActivate {
     }
     if (auth.user.status === 'suspended') {
       throw new ForbiddenException({ message: 'Account suspended', code: 'ACCOUNT_SUSPENDED' });
+    }
+    const required =
+      this.reflector.getAllAndOverride<string[]>(REQUIRED_SCOPES_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]) ?? [];
+    for (const scope of required) {
+      if (!hasScope(auth.role.permissions, scope)) {
+        throw new ForbiddenException({
+          message: `Missing required scope: ${scope}`,
+          code: 'SCOPE_FORBIDDEN',
+        });
+      }
     }
     req.auth = auth;
     return true;

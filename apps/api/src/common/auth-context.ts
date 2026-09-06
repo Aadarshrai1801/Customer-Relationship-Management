@@ -1,3 +1,5 @@
+import type { RolePermissions } from '@nexus/db';
+
 export interface AuthUser {
   id: string;
   orgId: string;
@@ -11,6 +13,7 @@ export interface AuthRole {
   id: string;
   key: string;
   name: string;
+  permissions: RolePermissions;
 }
 
 export interface AuthOrg {

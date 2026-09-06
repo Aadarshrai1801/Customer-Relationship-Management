@@ -7,43 +7,10 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/bootstrap';
+import { extractToken, findEmail, inviteAndAccept, loginAgent } from './helpers';
 
-const MAILPIT_URL = process.env.MAILPIT_URL ?? 'http://localhost:8025';
 const AUTH_DATABASE_URL =
   process.env.AUTH_DATABASE_URL ?? 'postgres://nexus_auth:nexus_auth@localhost:5432/nexus';
-
-interface MailpitMessage {
-  ID: string;
-  Subject: string;
-  To: Array<{ Address: string }>;
-  Text?: string;
-}
-
-async function findEmail(toFragment: string, subjectFragment: string): Promise<MailpitMessage> {
-  const started = Date.now();
-  while (Date.now() - started < 15000) {
-    const res = await fetch(`${MAILPIT_URL}/api/v1/messages?limit=100`);
-    const data = (await res.json()) as { messages?: MailpitMessage[] };
-    const match = (data.messages ?? []).find(
-      (m) =>
-        m.To?.some((t) => t.Address.includes(toFragment)) && m.Subject.includes(subjectFragment),
-    );
-    if (match) {
-      const full = (await (
-        await fetch(`${MAILPIT_URL}/api/v1/message/${match.ID}`)
-      ).json()) as MailpitMessage;
-      return { ...match, Text: full.Text };
-    }
-    await new Promise((r) => setTimeout(r, 300));
-  }
-  throw new Error(`email not found (to~${toFragment} subject~${subjectFragment})`);
-}
-
-function extractToken(text: string | undefined, path: string): string {
-  const match = text?.match(new RegExp(`${path}\\?token=([A-Za-z0-9_-]+)`));
-  if (!match?.[1]) throw new Error(`token not found in email body for ${path}`);
-  return match[1];
-}
 
 describe('auth core (signup, login, sessions, reset, invites)', () => {
   const runId = randomBytes(4).toString('hex');
@@ -51,7 +18,6 @@ describe('auth core (signup, login, sessions, reset, invites)', () => {
 
   let app: INestApplication;
   let server: Server;
-  let db: Pool;
   const orgIds: string[] = [];
 
   beforeAll(async () => {
@@ -60,10 +26,10 @@ describe('auth core (signup, login, sessions, reset, invites)', () => {
     configureApp(app);
     await app.init();
     server = app.getHttpServer();
-    db = new Pool({ connectionString: AUTH_DATABASE_URL });
   });
 
   afterAll(async () => {
+    const db = new Pool({ connectionString: AUTH_DATABASE_URL });
     for (const id of orgIds) {
       await db.query('DELETE FROM organizations WHERE id = $1', [id]);
     }
@@ -231,25 +197,44 @@ describe('auth core (signup, login, sessions, reset, invites)', () => {
   });
 
   it('blocks suspended users at login and on existing sessions', async () => {
-    const target = email('suspend');
-    await signup({
-      orgName: `Suspend ${runId}`,
-      name: 'S',
-      email: target,
+    const ownerAgent = request.agent(server);
+    const ownerSignup = await signup({
+      orgName: `SuspendOrg ${runId}`,
+      name: 'Olive Owner',
+      email: email('suspend-owner'),
       password: 'correct-horse-12',
     });
-    const agent = request.agent(server);
-    await agent.post('/v1/auth/login').send({ email: target, password: 'correct-horse-12' });
-    await db.query("UPDATE users SET status = 'suspended' WHERE email = $1", [target]);
+    await ownerAgent
+      .post('/v1/auth/login')
+      .send({ email: email('suspend-owner'), password: 'correct-horse-12' });
+    const target = await inviteAndAccept(server, ownerAgent, {
+      email: email('suspend'),
+      roleKey: 'rep',
+      name: 'Sam Suspended',
+    });
+    const repAgent = await loginAgent(server, email('suspend'), 'member-pass-12');
+
+    const suspended = await ownerAgent.post(`/v1/users/${target.id}/suspend`);
+    expect(suspended.status).toBe(200);
+    expect(suspended.body.status).toBe('suspended');
+    expect(ownerSignup.body.org.id).toBeDefined();
+
     const login = await request(server)
       .post('/v1/auth/login')
-      .send({ email: target, password: 'correct-horse-12' });
+      .send({ email: email('suspend'), password: 'member-pass-12' });
     expect(login.status).toBe(403);
     expect(login.body.code).toBe('ACCOUNT_SUSPENDED');
     // The pre-suspension session no longer resolves to a principal → unauthenticated.
-    const me = await agent.get('/v1/auth/me');
+    const me = await repAgent.get('/v1/auth/me');
     expect(me.status).toBe(401);
     expect(me.body.code).toBe('UNAUTHENTICATED');
+
+    const activated = await ownerAgent.post(`/v1/users/${target.id}/activate`);
+    expect(activated.status).toBe(200);
+    const relogin = await request(server)
+      .post('/v1/auth/login')
+      .send({ email: email('suspend'), password: 'member-pass-12' });
+    expect(relogin.status).toBe(200);
   });
 
   it('resets a password end-to-end via the emailed link and revokes old sessions', async () => {
@@ -350,7 +335,7 @@ describe('auth core (signup, login, sessions, reset, invites)', () => {
       .post('/v1/auth/invites')
       .send({ email: email('nope'), roleKey: 'rep' });
     expect(forbidden.status).toBe(403);
-    expect(forbidden.body.code).toBe('INVITE_FORBIDDEN');
+    expect(forbidden.body.code).toBe('SCOPE_FORBIDDEN');
 
     const ownerAgent = request.agent(server);
     await ownerAgent
