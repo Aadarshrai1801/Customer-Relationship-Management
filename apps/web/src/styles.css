@@ -1,0 +1,98 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Nexus design tokens (PRD 5.4). Semantic colors are CSS variables so light
+ * and dark mode share the same utility classes with full parity.
+ */
+:root {
+  --surface: #ffffff;
+  --surface-raised: #f6f7f9;
+  --surface-sunken: #eef0f3;
+  --border: #dfe3e8;
+  --border-strong: #c4ccd4;
+  --text-primary: #16191d;
+  --text-secondary: #5b6470;
+  --text-inverse: #ffffff;
+  --accent: #2456e6;
+  --accent-hover: #1a44c4;
+  --accent-soft: #e8eefc;
+  --success: #18794e;
+  --success-soft: #e6f4ec;
+  --warning: #9a5b00;
+  --warning-soft: #fdf1de;
+  --danger: #c4322b;
+  --danger-soft: #fbe9e7;
+  color-scheme: light;
+}
+
+.dark {
+  --surface: #14171c;
+  --surface-raised: #1c2128;
+  --surface-sunken: #242b33;
+  --border: #2e3640;
+  --border-strong: #454f5b;
+  --text-primary: #eef1f4;
+  --text-secondary: #a7b0bc;
+  --text-inverse: #16191d;
+  --accent: #6b8afd;
+  --accent-hover: #8aa3fd;
+  --accent-soft: #232c4d;
+  --success: #4cc38a;
+  --success-soft: #173b2a;
+  --warning: #e5a13d;
+  --warning-soft: #42300f;
+  --danger: #f26d63;
+  --danger-soft: #46201d;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-inverse: var(--text-inverse);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
+  /* PRD type scale: 12/14/16/20/24/32/40px, single family. */
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --text-3xl: 2rem;
+  --text-3xl--line-height: 2.5rem;
+  --text-4xl: 2.5rem;
+  --text-4xl--line-height: 3rem;
+
+  /* 3-tier elevation. */
+  --shadow-subtle: 0 1px 2px rgb(0 0 0 / 0.06);
+  --shadow-medium: 0 4px 12px rgb(0 0 0 / 0.1);
+  --shadow-prominent: 0 12px 32px rgb(0 0 0 / 0.18);
+}
+
+body {
+  background-color: var(--surface);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Visible keyboard focus everywhere (WCAG 2.1 AA). */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}

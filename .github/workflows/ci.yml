@@ -23,6 +23,11 @@ jobs:
           --health-interval 2s
           --health-timeout 5s
           --health-retries 30
+      mailpit:
+        image: axllent/mailpit:latest
+        ports:
+          - 1025:1025
+          - 8025:8025
     env:
       DATABASE_URL: postgres://nexus_app:nexus_app@localhost:5432/nexus
       AUTH_DATABASE_URL: postgres://nexus_auth:nexus_auth@localhost:5432/nexus
@@ -44,3 +49,7 @@ jobs:
       - run: npm run lint
       - run: npm run format:check
       - run: npm test
+      - run: npm run build -w @nexus/web
+      - run: npx playwright install chromium --with-deps
+        working-directory: apps/web
+      - run: npm run e2e -w @nexus/web

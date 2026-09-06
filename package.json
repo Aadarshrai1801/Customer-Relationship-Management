@@ -10,15 +10,17 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @nexus/db && npm run build -w @nexus/api",
-    "typecheck": "npm run typecheck -w @nexus/db && npm run typecheck -w @nexus/api",
+    "build": "npm run build -w @nexus/db && npm run build -w @nexus/api && npm run build -w @nexus/web",
+    "typecheck": "npm run typecheck -w @nexus/db && npm run typecheck -w @nexus/api && npm run typecheck -w @nexus/web",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx,js,mjs,json,md,css}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,json,md,css}\"",
-    "test": "npm run test -w @nexus/api",
+    "test": "npm run test -w @nexus/api && npm run test -w @nexus/web",
+    "test:e2e": "npm run e2e -w @nexus/web",
     "db:generate": "npm run generate -w @nexus/db",
     "db:migrate": "npm run migrate -w @nexus/db",
     "dev:api": "npm run dev -w @nexus/api",
+    "dev:web": "npm run dev -w @nexus/web",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down"
   },
