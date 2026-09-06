@@ -22,7 +22,7 @@ export function NotificationsPopover(): React.JSX.Element | null {
   const canRead = hasScope(user, 'notifications:read');
 
   // Query notifications with periodic polling
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ['notifications'],
     queryFn: () => api<NotificationsResponse>('/notifications?limit=20'),
     enabled: !!user && canRead,
@@ -80,13 +80,19 @@ export function NotificationsPopover(): React.JSX.Element | null {
     <div className="relative" ref={popoverRef}>
       <button
         type="button"
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          const next = !open;
+          setOpen(next);
+          if (next) void refetch();
+        }}
         aria-label={`Notifications (${unreadCount} unread)`}
         title="Notifications"
-        className="relative inline-flex h-8 w-8 items-center justify-center rounded text-text-secondary hover:bg-surface-raised hover:text-text-primary transition-colors focus-visible:outline-none"
+        className="relative inline-flex h-8 w-8 min-h-8 min-w-8 shrink-0 items-center justify-center rounded text-text-secondary hover:bg-surface-raised hover:text-text-primary transition-colors focus-visible:outline-none"
       >
         <svg
-          className="h-4.5 w-4.5"
+          width="18"
+          height="18"
+          className="h-5 w-5 shrink-0"
           fill="none"
           stroke="currentColor"
           strokeWidth={2}

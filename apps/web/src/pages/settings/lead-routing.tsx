@@ -36,7 +36,7 @@ export function LeadRoutingPage(): React.JSX.Element {
   // Query users for rule member selection
   const usersQuery = useQuery({
     queryKey: ['users-list'],
-    queryFn: () => api<{ users: UserSummary[] }>('/users'),
+    queryFn: () => api<UserSummary[]>('/users'),
   });
 
   // Availability form state
@@ -168,7 +168,7 @@ export function LeadRoutingPage(): React.JSX.Element {
     }
   };
 
-  const users = usersQuery.data?.users ?? [];
+  const users: UserSummary[] = (Array.isArray(usersQuery.data) ? usersQuery.data : (usersQuery.data as any)?.users) ?? [];
   const rules = rulesQuery.data ?? [];
 
   return (

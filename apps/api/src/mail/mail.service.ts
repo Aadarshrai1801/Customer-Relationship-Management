@@ -8,7 +8,8 @@ export class MailService {
   private readonly webOrigin: string;
 
   constructor() {
-    this.transporter = nodemailer.createTransport(process.env.SMTP_URL ?? 'smtp://localhost:1025');
+    const smtpUrl = (process.env.SMTP_URL ?? 'smtp://127.0.0.1:1025').replace('localhost:1025', '127.0.0.1:1025');
+    this.transporter = nodemailer.createTransport(smtpUrl);
     this.from = process.env.MAIL_FROM ?? 'Nexus CRM <noreply@nexus.local>';
     this.webOrigin = (process.env.WEB_ORIGIN ?? 'http://localhost:5173').split(',')[0]!;
   }

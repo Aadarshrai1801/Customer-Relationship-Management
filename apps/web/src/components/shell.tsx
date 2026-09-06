@@ -68,7 +68,7 @@ export function Shell({ children }: { children: React.ReactNode }): React.JSX.El
               ))}
             </nav>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <NotificationsPopover />
             <CommandPalette />
             <span className="hidden text-xs text-text-secondary xl:block">

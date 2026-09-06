@@ -232,25 +232,27 @@ export class LeadsService {
     });
 
     if (result.lead.ownerId && !result.deduplicated) {
-      try {
-        const [assignedUser] = await this.tenantDb.tx(auth.org.id, (db) =>
-          db.select({ email: users.email }).from(users).where(eq(users.id, result.lead.ownerId!)),
-        );
-        if (assignedUser?.email) {
-          await this.mail.sendLeadAssignedNotification(
-            assignedUser.email,
-            auth.org.name,
-            {
-              id: result.lead.id,
-              name: result.lead.name,
-              company: result.lead.company,
-              email: result.lead.email,
-            },
+      void (async () => {
+        try {
+          const [assignedUser] = await this.tenantDb.tx(auth.org.id, (db) =>
+            db.select({ email: users.email }).from(users).where(eq(users.id, result.lead.ownerId!)),
           );
+          if (assignedUser?.email) {
+            await this.mail.sendLeadAssignedNotification(
+              assignedUser.email,
+              auth.org.name,
+              {
+                id: result.lead.id,
+                name: result.lead.name,
+                company: result.lead.company,
+                email: result.lead.email,
+              },
+            );
+          }
+        } catch {
+          // Mail delivery is non-blocking
         }
-      } catch (mailErr) {
-        // Mail delivery is non-blocking
-      }
+      })();
     }
 
     return result;

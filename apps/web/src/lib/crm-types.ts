@@ -248,9 +248,13 @@ export interface AppNotification {
 }
 
 export interface WebToLeadSnippetResponse {
-  tenantToken: string;
-  formHtml: string;
-  endpointUrl: string;
-  fields: string[];
+  orgId?: string;
+  slug?: string;
+  endpoint?: string;
+  html?: string;
+  tenantToken?: string;
+  formHtml?: string;
+  endpointUrl?: string;
+  fields?: string[];
 }
 

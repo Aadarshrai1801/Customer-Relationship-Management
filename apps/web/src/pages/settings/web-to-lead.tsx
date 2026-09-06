@@ -30,9 +30,10 @@ export function WebToLeadPage(): React.JSX.Element {
     queryFn: () => api<WebToLeadSnippetResponse>('/web-to-lead/snippet'),
   });
 
-  const tenantToken = snippetQuery.data?.tenantToken || org?.slug || '';
-  const endpointUrl = snippetQuery.data?.endpointUrl || `${API_URL}/v1/web-to-lead`;
-  const snippetHtml = snippetQuery.data?.formHtml || '';
+  const tenantToken = snippetQuery.data?.slug || snippetQuery.data?.tenantToken || org?.slug || '';
+  const endpointUrl =
+    snippetQuery.data?.endpoint || snippetQuery.data?.endpointUrl || `${API_URL}/v1/web-to-lead`;
+  const snippetHtml = snippetQuery.data?.html || snippetQuery.data?.formHtml || '';
 
   const copyToClipboard = async (text: string, label: string) => {
     try {
