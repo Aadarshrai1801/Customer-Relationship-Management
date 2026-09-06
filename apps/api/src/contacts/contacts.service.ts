@@ -6,11 +6,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
-import { accounts, contacts, users, type Contact } from '@nexus/db';
+import { accounts, contactMerges, contactNotes, contacts, users, type Contact } from '@nexus/db';
 import { TenantDb, type NexusDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
 import { AuditService, diffObjects } from '../audit/audit.service';
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
+import {
+  assertValidMergeChoices,
+  DedupService,
+  mergeConflicts,
+  type RecordMatch,
+} from '../dedup/dedup.service';
 import {
   computeFormulas,
   validateCustomFields,
@@ -20,9 +26,25 @@ import { checkRecordAccess, fieldRule, filterReadableFields, hasScope } from '..
 import type { CreateContactInput, ListContactsQuery, UpdateContactInput } from './contacts.schemas';
 
 export interface ContactWarning {
-  code: 'DUPLICATE_EMAIL';
+  code: 'DUPLICATE_EMAIL' | 'POSSIBLE_DUPLICATE';
   message: string;
   contactIds: string[];
+  confidence?: 'exact' | 'high' | 'medium';
+}
+
+export interface MergeFieldComparison {
+  field: string;
+  winner: unknown;
+  loser: unknown;
+  conflict: boolean;
+}
+
+export interface MergePreview {
+  winnerId: string;
+  loserId: string;
+  fields: MergeFieldComparison[];
+  tags: { winner: string[]; loser: string[]; merged: string[] };
+  notesMoved: number;
 }
 
 export interface SerializedContact {
@@ -82,6 +104,7 @@ export class ContactsService {
     @Inject(TenantDb) private readonly tenantDb: TenantDb,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(CustomFieldsService) private readonly fields: CustomFieldsService,
+    @Inject(DedupService) private readonly dedup: DedupService,
   ) {}
 
   async create(
@@ -119,7 +142,14 @@ export class ContactsService {
         .returning();
       if (!created) throw new Error('Failed to create contact');
 
-      const warnings = await this.emailWarnings(db, auth.org.id, created.id, created.email);
+      const matches = await this.dedup.findContactMatches(
+        db,
+        auth.org.id,
+        { id: created.id, name: created.name, email: created.email, phone: created.phone },
+        created.id,
+      );
+      const warnings = this.warningsForMatches(matches);
+      await this.recordMatchCandidates(db, auth.org.id, created.id, matches);
       await this.audit.record(db, {
         orgId: auth.org.id,
         actorUserId: auth.user.id,
@@ -316,7 +346,14 @@ export class ContactsService {
       }
       const warnings =
         patch.email && patch.email !== row.contact.email
-          ? await this.emailWarnings(db, auth.org.id, updated.id, updated.email)
+          ? this.warningsForMatches(
+              await this.dedup.findContactMatches(
+                db,
+                auth.org.id,
+                { id: updated.id, name: updated.name, email: updated.email, phone: updated.phone },
+                updated.id,
+              ),
+            )
           : [];
       return { contact: await this.serialize(db, auth, defs, updated), warnings };
     });
@@ -347,32 +384,245 @@ export class ContactsService {
     });
   }
 
-  /** Exact-email matches for the duplicate warning (fuzzy engine lands in PR6). */
-  async emailWarnings(
+  /** Duplicate warnings via the dedup engine (exact email keeps its own code per the AC). */
+  warningsForMatches(matches: RecordMatch[]): ContactWarning[] {
+    return matches.map((m) =>
+      m.confidence === 'exact'
+        ? {
+            code: 'DUPLICATE_EMAIL' as const,
+            message: 'Another contact already uses this email address',
+            contactIds: [m.id],
+            confidence: m.confidence,
+          }
+        : {
+            code: 'POSSIBLE_DUPLICATE' as const,
+            message: `Possible duplicate contact (${m.confidence} confidence)`,
+            contactIds: [m.id],
+            confidence: m.confidence,
+          },
+    );
+  }
+
+  /** Records on-create matches as review candidates (best confidence wins per pair). */
+  async recordMatchCandidates(
     db: NexusDb,
     orgId: string,
-    excludeId: string,
-    email: string,
-  ): Promise<ContactWarning[]> {
-    const matches = await db
-      .select({ id: contacts.id })
-      .from(contacts)
-      .where(
-        and(
-          eq(contacts.orgId, orgId),
-          sql`lower(${contacts.email}) = ${email.toLowerCase()}`,
-          isNull(contacts.deletedAt),
-          sql`${contacts.id} != ${excludeId}`,
-        ),
+    contactId: string,
+    matches: RecordMatch[],
+  ): Promise<void> {
+    await this.dedup.recordCandidates(db, orgId, 'contact', contactId, matches);
+  }
+
+  private static readonly MERGEABLE_STANDARD_FIELDS = [
+    'name',
+    'firstName',
+    'lastName',
+    'email',
+    'phone',
+    'title',
+    'lifecycleStage',
+    'accountId',
+  ] as const;
+
+  /**
+   * Merge preview: per-field winner/loser values with conflict flags, tag
+   * union, and the number of notes that will move. Tags always union;
+   * ownership stays with the winner.
+   */
+  async mergePreview(auth: AuthContext, winnerId: string, loserId: string): Promise<MergePreview> {
+    return this.tenantDb.tx(auth.org.id, async (db) => {
+      const { winner, loser, defs } = await this.loadMergePair(db, auth, winnerId, loserId);
+      return this.buildMergePreview(defs, winner.contact, loser.contact, db, auth.org.id);
+    });
+  }
+
+  async mergeContacts(
+    auth: AuthContext,
+    winnerId: string,
+    loserId: string,
+    fieldChoices: Record<string, 'winner' | 'loser'>,
+  ): Promise<{ contact: SerializedContact; mergedLoserId: string }> {
+    return this.tenantDb.tx(auth.org.id, async (db) => {
+      const { winner, loser, defs } = await this.loadMergePair(db, auth, winnerId, loserId);
+      const preview = await this.buildMergePreview(
+        defs,
+        winner.contact,
+        loser.contact,
+        db,
+        auth.org.id,
       );
-    if (matches.length === 0) return [];
-    return [
-      {
-        code: 'DUPLICATE_EMAIL',
-        message: 'Another contact already uses this email address',
-        contactIds: matches.map((m) => m.id),
-      },
-    ];
+      const eligible = preview.fields.map((f) => f.field);
+      const conflicts = mergeConflicts(preview.fields);
+      try {
+        assertValidMergeChoices(eligible, conflicts, fieldChoices);
+      } catch (err) {
+        throw new BadRequestException({
+          message: (err as Error).message,
+          code: 'MERGE_CHOICE_INVALID',
+        });
+      }
+
+      const pick = (field: string, winnerValue: unknown, loserValue: unknown): unknown =>
+        fieldChoices[field] === 'loser' ? loserValue : winnerValue;
+
+      const winnerBefore = { ...winner.contact };
+      const mergedTags = [...new Set([...winner.contact.tags, ...loser.contact.tags])].slice(0, 20);
+      const mergedCustom: Record<string, unknown> = {
+        ...(winner.contact.customFields as Record<string, unknown>),
+      };
+      for (const def of defs) {
+        if (def.type === 'formula') continue;
+        const key = `custom.${def.key}`;
+        if (!(key in fieldChoices)) continue;
+        const loserCustom = (loser.contact.customFields ?? {}) as Record<string, unknown>;
+        if (fieldChoices[key] === 'loser') {
+          if (def.key in loserCustom) mergedCustom[def.key] = loserCustom[def.key];
+          else delete mergedCustom[def.key];
+        }
+      }
+      const patch: Record<string, unknown> = {
+        name: pick('name', winner.contact.name, loser.contact.name),
+        firstName: pick('firstName', winner.contact.firstName, loser.contact.firstName),
+        lastName: pick('lastName', winner.contact.lastName, loser.contact.lastName),
+        email: pick('email', winner.contact.email, loser.contact.email),
+        phone: pick('phone', winner.contact.phone, loser.contact.phone),
+        title: pick('title', winner.contact.title, loser.contact.title),
+        lifecycleStage: pick(
+          'lifecycleStage',
+          winner.contact.lifecycleStage,
+          loser.contact.lifecycleStage,
+        ),
+        accountId: pick('accountId', winner.contact.accountId, loser.contact.accountId),
+        tags: mergedTags,
+        customFields: mergedCustom,
+        updatedAt: new Date(),
+      };
+      const newAccountId = patch['accountId'] as string | null;
+      if (newAccountId) {
+        const [account] = await db
+          .select({ id: accounts.id })
+          .from(accounts)
+          .where(
+            and(
+              eq(accounts.id, newAccountId),
+              eq(accounts.orgId, auth.org.id),
+              isNull(accounts.deletedAt),
+            ),
+          );
+        if (!account) {
+          throw new BadRequestException({
+            message: 'Chosen account no longer exists',
+            code: 'MERGE_ACCOUNT_INVALID',
+          });
+        }
+      }
+      const [updated] = await db
+        .update(contacts)
+        .set(patch as Partial<Contact>)
+        .where(eq(contacts.id, winner.contact.id))
+        .returning();
+      if (!updated) throw new Error('Failed to merge contacts');
+
+      const movedNotes = await db
+        .update(contactNotes)
+        .set({ contactId: winner.contact.id })
+        .where(
+          and(eq(contactNotes.contactId, loser.contact.id), eq(contactNotes.orgId, auth.org.id)),
+        )
+        .returning({ id: contactNotes.id });
+
+      await db
+        .update(contacts)
+        .set({ deletedAt: new Date(), mergedIntoId: winner.contact.id })
+        .where(eq(contacts.id, loser.contact.id));
+
+      await db.insert(contactMerges).values({
+        orgId: auth.org.id,
+        winnerId: winner.contact.id,
+        loserId: loser.contact.id,
+        loserSnapshot: {
+          loser: loser.contact,
+          winnerBefore,
+          winnerAfter: updated,
+        },
+        fieldChoices,
+        mergedBy: auth.user.id,
+      });
+      await this.dedup.markMerged(db, auth.org.id, 'contact', winner.contact.id, loser.contact.id);
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: 'contact.merged',
+        entityType: 'contact',
+        entityId: winner.contact.id,
+        newValues: {
+          loserId: loser.contact.id,
+          loserEmail: loser.contact.email,
+          fieldChoices,
+          notesMoved: movedNotes.length,
+        },
+      });
+      return {
+        contact: await this.serialize(db, auth, defs, updated),
+        mergedLoserId: loser.contact.id,
+      };
+    });
+  }
+
+  private async loadMergePair(db: NexusDb, auth: AuthContext, winnerId: string, loserId: string) {
+    if (winnerId === loserId) {
+      throw new BadRequestException({
+        message: 'Cannot merge a contact into itself',
+        code: 'MERGE_SAME_RECORD',
+      });
+    }
+    const defs = await this.fields.loadDefinitions(db, auth.org.id, 'contact');
+    const winner = await this.requireLiveContact(db, auth.org.id, winnerId);
+    const loser = await this.requireLiveContact(db, auth.org.id, loserId);
+    this.assertContactReadable(auth, winner.contact.ownerId);
+    this.assertContactReadable(auth, loser.contact.ownerId);
+    return { winner, loser, defs };
+  }
+
+  private async buildMergePreview(
+    defs: FieldDefinition[],
+    winner: Contact,
+    loser: Contact,
+    db: NexusDb,
+    orgId: string,
+  ): Promise<MergePreview> {
+    const standard = ContactsService.MERGEABLE_STANDARD_FIELDS.map((field) => ({
+      field,
+      winner: winner[field as keyof Contact],
+      loser: loser[field as keyof Contact],
+    }));
+    const winnerCustom = (winner.customFields ?? {}) as Record<string, unknown>;
+    const loserCustom = (loser.customFields ?? {}) as Record<string, unknown>;
+    const customKeys = [
+      ...new Set([...Object.keys(winnerCustom), ...Object.keys(loserCustom)]),
+    ].filter((key) => defs.some((d) => d.key === key && d.type !== 'formula'));
+    const custom = customKeys.map((key) => ({
+      field: `custom.${key}`,
+      winner: winnerCustom[key] ?? null,
+      loser: loserCustom[key] ?? null,
+    }));
+    const fields = [...standard, ...custom].map((f) => ({
+      ...f,
+      conflict: mergeConflicts([{ field: f.field, winner: f.winner, loser: f.loser }]).length > 0,
+    }));
+    const merged = [...new Set([...winner.tags, ...loser.tags])].slice(0, 20);
+    const notes = await db
+      .select({ id: contactNotes.id })
+      .from(contactNotes)
+      .where(and(eq(contactNotes.contactId, loser.id), eq(contactNotes.orgId, orgId)));
+    return {
+      winnerId: winner.id,
+      loserId: loser.id,
+      fields,
+      tags: { winner: winner.tags, loser: loser.tags, merged },
+      notesMoved: notes.length,
+    };
   }
 
   private recordScope(auth: AuthContext): 'all' | 'own' {

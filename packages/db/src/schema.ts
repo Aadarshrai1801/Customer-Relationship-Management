@@ -282,6 +282,7 @@ export type NewCustomFieldDefinition = typeof customFieldDefinitions.$inferInser
 export type ContactNote = typeof contactNotes.$inferSelect;
 export type DuplicateCandidate = typeof duplicateCandidates.$inferSelect;
 export type ContactMerge = typeof contactMerges.$inferSelect;
+export type AccountMerge = typeof accountMerges.$inferSelect;
 export type ImportJob = typeof importJobs.$inferSelect;
 
 export const LIFECYCLE_STAGES = [
@@ -424,6 +425,19 @@ export const duplicateCandidates = pgTable(
 );
 
 export const contactMerges = pgTable('contact_merges', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id')
+    .notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  winnerId: uuid('winner_id').notNull(),
+  loserId: uuid('loser_id').notNull(),
+  loserSnapshot: jsonb('loser_snapshot').$type<Record<string, unknown>>().notNull(),
+  fieldChoices: jsonb('field_choices').$type<Record<string, 'winner' | 'loser'>>().notNull(),
+  mergedBy: uuid('merged_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const accountMerges = pgTable('account_merges', {
   id: uuid('id').primaryKey().defaultRandom(),
   orgId: uuid('org_id')
     .notNull()

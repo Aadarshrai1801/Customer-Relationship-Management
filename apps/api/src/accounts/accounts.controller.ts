@@ -23,6 +23,12 @@ import {
   type ListAccountsQuery,
   type UpdateAccountInput,
 } from './accounts.schemas';
+import {
+  mergeBodySchema,
+  mergePreviewQuerySchema,
+  type MergeBody,
+  type MergePreviewQuery,
+} from '../common/merge.schemas';
 
 function authOf(req: Request): NonNullable<Request['auth']> {
   if (!req.auth) throw new UnauthorizedException();
@@ -65,6 +71,28 @@ export class AccountsController {
     @Body(new ZodValidationPipe(updateAccountSchema)) body: unknown,
   ): Promise<unknown> {
     return this.accounts.update(authOf(req), id, body as UpdateAccountInput);
+  }
+
+  @RequireScopes('accounts:manage')
+  @Get(':id/merge-preview')
+  async mergePreview(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Query(new ZodValidationPipe(mergePreviewQuerySchema)) query: unknown,
+  ): Promise<unknown> {
+    const { loserId } = query as MergePreviewQuery;
+    return this.accounts.mergePreview(authOf(req), id, loserId);
+  }
+
+  @RequireScopes('accounts:manage')
+  @Post(':id/merge')
+  async merge(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(mergeBodySchema)) body: unknown,
+  ): Promise<unknown> {
+    const { loserId, fieldChoices } = body as MergeBody;
+    return this.accounts.mergeAccounts(authOf(req), id, loserId, fieldChoices);
   }
 
   @RequireScopes('accounts:manage')

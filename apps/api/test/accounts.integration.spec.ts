@@ -68,13 +68,14 @@ describe('accounts', () => {
       customFields: { employees: 120 },
     });
     expect(res.status).toBe(201);
-    expect(res.body.domains).toEqual(['acme.test']);
-    expect(res.body.contactCount).toBe(0);
-    expect(res.body.children).toEqual([]);
+    expect(res.body.account.domains).toEqual(['acme.test']);
+    expect(res.body.account.contactCount).toBe(0);
+    expect(res.body.account.children).toEqual([]);
+    expect(res.body.warnings).toEqual([]);
 
     const audit = await ownerAgent
       .get('/v1/audit-log')
-      .query({ action: 'account.created', entityId: res.body.id });
+      .query({ action: 'account.created', entityId: res.body.account.id });
     expect(audit.body.entries).toHaveLength(1);
   });
 
@@ -100,33 +101,33 @@ describe('accounts', () => {
     const parent = await ownerAgent.post('/v1/accounts').send({ name: 'Parent Co' });
     const child = await ownerAgent.post('/v1/accounts').send({
       name: 'Child Co',
-      parentId: parent.body.id as string,
+      parentId: parent.body.account.id as string,
     });
     expect(child.status).toBe(201);
-    expect(child.body.parent).toMatchObject({ id: parent.body.id });
+    expect(child.body.account.parent).toMatchObject({ id: parent.body.account.id });
 
-    const detail = await ownerAgent.get(`/v1/accounts/${parent.body.id as string}`);
+    const detail = await ownerAgent.get(`/v1/accounts/${parent.body.account.id as string}`);
     expect(detail.body.children).toHaveLength(1);
     expect(detail.body.children[0].name).toBe('Child Co');
 
     const selfParent = await ownerAgent
-      .patch(`/v1/accounts/${parent.body.id as string}`)
-      .send({ parentId: parent.body.id as string });
+      .patch(`/v1/accounts/${parent.body.account.id as string}`)
+      .send({ parentId: parent.body.account.id as string });
     expect(selfParent.status).toBe(409);
     expect(selfParent.body.code).toBe('ACCOUNT_CYCLE');
 
     const cycle = await ownerAgent
-      .patch(`/v1/accounts/${parent.body.id as string}`)
-      .send({ parentId: child.body.id as string });
+      .patch(`/v1/accounts/${parent.body.account.id as string}`)
+      .send({ parentId: child.body.account.id as string });
     expect(cycle.status).toBe(409);
 
     const grandchild = await ownerAgent.post('/v1/accounts').send({
       name: 'Grandchild Co',
-      parentId: child.body.id as string,
+      parentId: child.body.account.id as string,
     });
     const deepCycle = await ownerAgent
-      .patch(`/v1/accounts/${parent.body.id as string}`)
-      .send({ parentId: grandchild.body.id as string });
+      .patch(`/v1/accounts/${parent.body.account.id as string}`)
+      .send({ parentId: grandchild.body.account.id as string });
     expect(deepCycle.status).toBe(409);
 
     const unknownParent = await ownerAgent.post('/v1/accounts').send({
@@ -141,16 +142,16 @@ describe('accounts', () => {
     const contact = await ownerAgent.post('/v1/contacts').send({
       name: 'Counted Person',
       email: `counted-${runId}@example.test`,
-      accountId: account.body.id as string,
+      accountId: account.body.account.id as string,
     });
     expect(contact.status).toBe(201);
-    expect(contact.body.contact.account).toMatchObject({ id: account.body.id });
+    expect(contact.body.contact.account).toMatchObject({ id: account.body.account.id });
 
-    const detail = await ownerAgent.get(`/v1/accounts/${account.body.id as string}`);
+    const detail = await ownerAgent.get(`/v1/accounts/${account.body.account.id as string}`);
     expect(detail.body.contactCount).toBe(1);
 
     await ownerAgent.delete(`/v1/contacts/${contact.body.contact.id as string}`);
-    const after = await ownerAgent.get(`/v1/accounts/${account.body.id as string}`);
+    const after = await ownerAgent.get(`/v1/accounts/${account.body.account.id as string}`);
     expect(after.body.contactCount).toBe(0);
   });
 
@@ -165,16 +166,13 @@ describe('accounts', () => {
     expect(mine.status).toBe(201);
 
     const repList = await repAgent.get('/v1/accounts');
-    expect(repList.body.accounts.map((a: { id: string }) => a.id)).toEqual([mine.body.id]);
+    expect(repList.body.accounts.map((a: { id: string }) => a.id)).toEqual([mine.body.account.id]);
 
     const ownerList = await ownerAgent.get('/v1/accounts');
     expect(ownerList.body.accounts.length).toBeGreaterThan(1);
 
-    const blocked = await repAgent.get(`/v1/accounts/${ownerList.body.accounts[0].id as string}`);
-    // The first account in the owner list may be the rep's own; find another.
-    void blocked;
     const foreign = ownerList.body.accounts.find(
-      (a: { id: string }) => a.id !== (mine.body.id as string),
+      (a: { id: string }) => a.id !== (mine.body.account.id as string),
     ) as { id: string };
     const denied = await repAgent.get(`/v1/accounts/${foreign.id}`);
     expect(denied.status).toBe(403);
@@ -182,7 +180,7 @@ describe('accounts', () => {
 
   it('updates, validates, and soft-deletes', async () => {
     const created = await ownerAgent.post('/v1/accounts').send({ name: 'Mutable Co' });
-    const id = created.body.id as string;
+    const id = created.body.account.id as string;
     const updated = await ownerAgent.patch(`/v1/accounts/${id}`).send({
       industry: 'Finance',
       domains: ['mutable.test'],

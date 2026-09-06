@@ -23,6 +23,12 @@ import {
   type ListContactsQuery,
   type UpdateContactInput,
 } from './contacts.schemas';
+import {
+  mergeBodySchema,
+  mergePreviewQuerySchema,
+  type MergeBody,
+  type MergePreviewQuery,
+} from '../common/merge.schemas';
 
 function authOf(req: Request): NonNullable<Request['auth']> {
   if (!req.auth) throw new UnauthorizedException();
@@ -65,6 +71,28 @@ export class ContactsController {
     @Body(new ZodValidationPipe(updateContactSchema)) body: unknown,
   ): Promise<unknown> {
     return this.contacts.update(authOf(req), id, body as UpdateContactInput);
+  }
+
+  @RequireScopes('contacts:manage')
+  @Get(':id/merge-preview')
+  async mergePreview(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Query(new ZodValidationPipe(mergePreviewQuerySchema)) query: unknown,
+  ): Promise<unknown> {
+    const { loserId } = query as MergePreviewQuery;
+    return this.contacts.mergePreview(authOf(req), id, loserId);
+  }
+
+  @RequireScopes('contacts:manage')
+  @Post(':id/merge')
+  async merge(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(mergeBodySchema)) body: unknown,
+  ): Promise<unknown> {
+    const { loserId, fieldChoices } = body as MergeBody;
+    return this.contacts.mergeContacts(authOf(req), id, loserId, fieldChoices);
   }
 
   @RequireScopes('contacts:manage')

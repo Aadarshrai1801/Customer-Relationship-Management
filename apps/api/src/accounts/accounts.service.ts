@@ -7,11 +7,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
-import { accounts, contacts, users, type Account } from '@nexus/db';
+import { accounts, accountMerges, contacts, users, type Account } from '@nexus/db';
 import { TenantDb, type NexusDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
 import { AuditService, diffObjects } from '../audit/audit.service';
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
+import {
+  assertValidMergeChoices,
+  DedupService,
+  mergeConflicts,
+  type RecordMatch,
+} from '../dedup/dedup.service';
 import {
   computeFormulas,
   validateCustomFields,
@@ -20,6 +26,29 @@ import {
 import { checkRecordAccess, fieldRule, filterReadableFields, hasScope } from '../rbac/permissions';
 import type { CreateAccountInput, ListAccountsQuery, UpdateAccountInput } from './accounts.schemas';
 
+export interface AccountWarning {
+  code: 'POSSIBLE_DUPLICATE';
+  message: string;
+  accountIds: string[];
+  confidence: 'exact' | 'high' | 'medium';
+}
+
+export interface MergeFieldComparison {
+  field: string;
+  winner: unknown;
+  loser: unknown;
+  conflict: boolean;
+}
+
+export interface AccountMergePreview {
+  winnerId: string;
+  loserId: string;
+  fields: MergeFieldComparison[];
+  tags: { winner: string[]; loser: string[]; merged: string[] };
+  domains: { winner: string[]; loser: string[]; merged: string[] };
+  contactsMoved: number;
+  childrenMoved: number;
+}
 export interface SerializedAccount {
   id: string;
   name: string;
@@ -71,9 +100,13 @@ export class AccountsService {
     @Inject(TenantDb) private readonly tenantDb: TenantDb,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(CustomFieldsService) private readonly fields: CustomFieldsService,
+    @Inject(DedupService) private readonly dedup: DedupService,
   ) {}
 
-  async create(auth: AuthContext, input: CreateAccountInput): Promise<SerializedAccount> {
+  async create(
+    auth: AuthContext,
+    input: CreateAccountInput,
+  ): Promise<{ account: SerializedAccount; warnings: AccountWarning[] }> {
     return this.tenantDb.tx(auth.org.id, async (db) => {
       const defs = await this.fields.loadDefinitions(db, auth.org.id, 'account');
       const { values: customFields, issues } = validateCustomFields(defs, input.customFields);
@@ -103,6 +136,20 @@ export class AccountsService {
         })
         .returning();
       if (!created) throw new Error('Failed to create account');
+      const matches = await this.dedup.findAccountMatches(
+        db,
+        auth.org.id,
+        {
+          id: created.id,
+          name: created.name,
+          website: created.website,
+          phone: created.phone,
+          domains: created.domains,
+        },
+        created.id,
+      );
+      const warnings = this.warningsForMatches(matches);
+      await this.dedup.recordCandidates(db, auth.org.id, 'account', created.id, matches);
       await this.audit.record(db, {
         orgId: auth.org.id,
         actorUserId: auth.user.id,
@@ -112,7 +159,7 @@ export class AccountsService {
         entityId: created.id,
         newValues: { name: created.name, parentId: created.parentId, ownerId: created.ownerId },
       });
-      return this.serialize(db, auth, defs, created);
+      return { account: await this.serialize(db, auth, defs, created), warnings };
     });
   }
 
@@ -325,6 +372,229 @@ export class AccountsService {
       });
       return { ok: true as const };
     });
+  }
+
+  warningsForMatches(matches: RecordMatch[]): AccountWarning[] {
+    return matches.map((m) => ({
+      code: 'POSSIBLE_DUPLICATE' as const,
+      message: `Possible duplicate account (${m.confidence} confidence)`,
+      accountIds: [m.id],
+      confidence: m.confidence,
+    }));
+  }
+
+  private static readonly MERGEABLE_STANDARD_FIELDS = [
+    'name',
+    'website',
+    'phone',
+    'industry',
+    'parentId',
+  ] as const;
+
+  async mergePreview(
+    auth: AuthContext,
+    winnerId: string,
+    loserId: string,
+  ): Promise<AccountMergePreview> {
+    return this.tenantDb.tx(auth.org.id, async (db) => {
+      const { winner, loser, defs } = await this.loadMergePair(db, auth, winnerId, loserId);
+      return this.buildMergePreview(db, auth.org.id, defs, winner, loser);
+    });
+  }
+
+  async mergeAccounts(
+    auth: AuthContext,
+    winnerId: string,
+    loserId: string,
+    fieldChoices: Record<string, 'winner' | 'loser'>,
+  ): Promise<{ account: SerializedAccount; mergedLoserId: string }> {
+    return this.tenantDb.tx(auth.org.id, async (db) => {
+      const { winner, loser, defs } = await this.loadMergePair(db, auth, winnerId, loserId);
+      const preview = await this.buildMergePreview(db, auth.org.id, defs, winner, loser);
+      const eligible = preview.fields.map((f) => f.field);
+      const conflicts = mergeConflicts(preview.fields);
+      try {
+        assertValidMergeChoices(eligible, conflicts, fieldChoices);
+      } catch (err) {
+        throw new BadRequestException({
+          message: (err as Error).message,
+          code: 'MERGE_CHOICE_INVALID',
+        });
+      }
+
+      const pick = (field: string, winnerValue: unknown, loserValue: unknown): unknown =>
+        fieldChoices[field] === 'loser' ? loserValue : winnerValue;
+
+      const winnerBefore = { ...winner };
+      const mergedTags = [...new Set([...winner.tags, ...loser.tags])].slice(0, 20);
+      const mergedDomains = [...new Set([...winner.domains, ...loser.domains])].slice(0, 20);
+      const mergedCustom: Record<string, unknown> = {
+        ...(winner.customFields as Record<string, unknown>),
+      };
+      for (const def of defs) {
+        if (def.type === 'formula') continue;
+        const key = `custom.${def.key}`;
+        if (!(key in fieldChoices)) continue;
+        const loserCustom = (loser.customFields ?? {}) as Record<string, unknown>;
+        if (fieldChoices[key] === 'loser') {
+          if (def.key in loserCustom) mergedCustom[def.key] = loserCustom[def.key];
+          else delete mergedCustom[def.key];
+        }
+      }
+      let parentId = pick('parentId', winner.parentId, loser.parentId) as string | null;
+      if (parentId === winner.id) {
+        // Winner sat under the loser: transplant one level up instead of
+        // pointing at a deleted record.
+        parentId = loser.parentId === winner.id ? null : loser.parentId;
+      }
+      if (parentId) {
+        await this.requireAccount(db, auth.org.id, parentId);
+        await this.assertNoCycle(db, auth.org.id, winner.id, parentId);
+      }
+      const [updated] = await db
+        .update(accounts)
+        .set({
+          name: pick('name', winner.name, loser.name) as string,
+          website: pick('website', winner.website, loser.website) as string | null,
+          phone: pick('phone', winner.phone, loser.phone) as string | null,
+          industry: pick('industry', winner.industry, loser.industry) as string | null,
+          parentId,
+          tags: mergedTags,
+          domains: mergedDomains,
+          customFields: mergedCustom,
+          updatedAt: new Date(),
+        })
+        .where(eq(accounts.id, winner.id))
+        .returning();
+      if (!updated) throw new Error('Failed to merge accounts');
+
+      const movedContacts = await db
+        .update(contacts)
+        .set({ accountId: winner.id })
+        .where(and(eq(contacts.accountId, loser.id), eq(contacts.orgId, auth.org.id)))
+        .returning({ id: contacts.id });
+      const movedChildren = await db
+        .update(accounts)
+        .set({ parentId: winner.id })
+        .where(
+          and(
+            eq(accounts.parentId, loser.id),
+            eq(accounts.orgId, auth.org.id),
+            isNull(accounts.deletedAt),
+          ),
+        )
+        .returning({ id: accounts.id });
+
+      await db.update(accounts).set({ deletedAt: new Date() }).where(eq(accounts.id, loser.id));
+      await db.insert(accountMerges).values({
+        orgId: auth.org.id,
+        winnerId: winner.id,
+        loserId: loser.id,
+        loserSnapshot: { loser, winnerBefore, winnerAfter: updated },
+        fieldChoices,
+        mergedBy: auth.user.id,
+      });
+      await this.dedup.markMerged(db, auth.org.id, 'account', winner.id, loser.id);
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: 'account.merged',
+        entityType: 'account',
+        entityId: winner.id,
+        newValues: {
+          loserId: loser.id,
+          loserName: loser.name,
+          fieldChoices,
+          contactsMoved: movedContacts.length,
+          childrenMoved: movedChildren.length,
+        },
+      });
+      return { account: await this.serialize(db, auth, defs, updated), mergedLoserId: loser.id };
+    });
+  }
+
+  private async loadMergePair(db: NexusDb, auth: AuthContext, winnerId: string, loserId: string) {
+    if (winnerId === loserId) {
+      throw new BadRequestException({
+        message: 'Cannot merge an account into itself',
+        code: 'MERGE_SAME_RECORD',
+      });
+    }
+    const defs = await this.fields.loadDefinitions(db, auth.org.id, 'account');
+    const winner = await this.requireLiveAccount(db, auth, winnerId);
+    const loser = await this.requireLiveAccount(db, auth, loserId);
+    return { winner, loser, defs };
+  }
+
+  private async requireLiveAccount(db: NexusDb, auth: AuthContext, id: string): Promise<Account> {
+    const row = await this.findLive(db, auth.org.id, id);
+    if (!row) {
+      throw new NotFoundException({ message: 'Account not found', code: 'ACCOUNT_NOT_FOUND' });
+    }
+    this.assertReadable(auth, row.account.ownerId);
+    return row.account;
+  }
+
+  private async buildMergePreview(
+    db: NexusDb,
+    orgId: string,
+    defs: FieldDefinition[],
+    winner: Account,
+    loser: Account,
+  ): Promise<AccountMergePreview> {
+    const standard = AccountsService.MERGEABLE_STANDARD_FIELDS.map((field) => ({
+      field,
+      winner: winner[field],
+      loser: loser[field],
+    }));
+    const winnerCustom = (winner.customFields ?? {}) as Record<string, unknown>;
+    const loserCustom = (loser.customFields ?? {}) as Record<string, unknown>;
+    const customKeys = [
+      ...new Set([...Object.keys(winnerCustom), ...Object.keys(loserCustom)]),
+    ].filter((key) => defs.some((d) => d.key === key && d.type !== 'formula'));
+    const custom = customKeys.map((key) => ({
+      field: `custom.${key}`,
+      winner: winnerCustom[key] ?? null,
+      loser: loserCustom[key] ?? null,
+    }));
+    const fields = [...standard, ...custom].map((f) => ({
+      ...f,
+      conflict: mergeConflicts([{ field: f.field, winner: f.winner, loser: f.loser }]).length > 0,
+    }));
+    const movedContacts = await db
+      .select({ id: contacts.id })
+      .from(contacts)
+      .where(
+        and(
+          eq(contacts.accountId, loser.id),
+          eq(contacts.orgId, orgId),
+          isNull(contacts.deletedAt),
+        ),
+      );
+    const movedChildren = await db
+      .select({ id: accounts.id })
+      .from(accounts)
+      .where(
+        and(eq(accounts.parentId, loser.id), eq(accounts.orgId, orgId), isNull(accounts.deletedAt)),
+      );
+    return {
+      winnerId: winner.id,
+      loserId: loser.id,
+      fields,
+      tags: {
+        winner: winner.tags,
+        loser: loser.tags,
+        merged: [...new Set([...winner.tags, ...loser.tags])].slice(0, 20),
+      },
+      domains: {
+        winner: winner.domains,
+        loser: loser.domains,
+        merged: [...new Set([...winner.domains, ...loser.domains])].slice(0, 20),
+      },
+      contactsMoved: movedContacts.length,
+      childrenMoved: movedChildren.length,
+    };
   }
 
   private recordScope(auth: AuthContext): 'all' | 'own' {
