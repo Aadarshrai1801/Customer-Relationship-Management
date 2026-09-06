@@ -43,6 +43,13 @@
       "when": 1788694148645,
       "tag": "0005_privacy",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788698721537,
+      "tag": "0006_contacts",
+      "breakpoints": true
     }
   ]
 }

@@ -5,8 +5,10 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  index,
   uuid,
   bigserial,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -271,5 +273,192 @@ export type AuditLogEntry = typeof auditLogEntries.$inferSelect;
 export type NewAuditLogEntry = typeof auditLogEntries.$inferInsert;
 export type GdprExport = typeof gdprExports.$inferSelect;
 export type NewGdprExport = typeof gdprExports.$inferInsert;
+export type Account = typeof accounts.$inferSelect;
+export type NewAccount = typeof accounts.$inferInsert;
+export type Contact = typeof contacts.$inferSelect;
+export type NewContact = typeof contacts.$inferInsert;
+export type CustomFieldDefinition = typeof customFieldDefinitions.$inferSelect;
+export type NewCustomFieldDefinition = typeof customFieldDefinitions.$inferInsert;
+export type ContactNote = typeof contactNotes.$inferSelect;
+export type DuplicateCandidate = typeof duplicateCandidates.$inferSelect;
+export type ContactMerge = typeof contactMerges.$inferSelect;
+export type ImportJob = typeof importJobs.$inferSelect;
+
+export const LIFECYCLE_STAGES = [
+  'lead',
+  'mql',
+  'sql',
+  'opportunity',
+  'customer',
+  'evangelist',
+  'other',
+] as const;
+
+export type LifecycleStage = (typeof LIFECYCLE_STAGES)[number];
+
+export const CUSTOM_FIELD_TYPES = [
+  'text',
+  'number',
+  'date',
+  'picklist',
+  'multi_select',
+  'checkbox',
+  'currency',
+  'formula',
+] as const;
+
+export type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[number];
+
+export const accounts = pgTable(
+  'accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    website: text('website'),
+    domains: text('domains').array().notNull().default([]),
+    phone: text('phone'),
+    industry: text('industry'),
+    parentId: uuid('parent_id').references((): AnyPgColumn => accounts.id, {
+      onDelete: 'set null',
+    }),
+    tags: text('tags').array().notNull().default([]),
+    customFields: jsonb('custom_fields').$type<Record<string, unknown>>().notNull().default({}),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_accounts_org_parent').on(t.orgId, t.parentId)],
+);
+
+export const contacts = pgTable(
+  'contacts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    accountId: uuid('account_id').references(() => accounts.id, { onDelete: 'set null' }),
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    firstName: text('first_name'),
+    lastName: text('last_name'),
+    email: text('email').notNull(),
+    phone: text('phone'),
+    title: text('title'),
+    lifecycleStage: text('lifecycle_stage').notNull().default('lead'),
+    tags: text('tags').array().notNull().default([]),
+    customFields: jsonb('custom_fields').$type<Record<string, unknown>>().notNull().default({}),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    mergedIntoId: uuid('merged_into_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ix_contacts_org_email').on(t.orgId, sql`lower(${t.email})`),
+    index('ix_contacts_org_account').on(t.orgId, t.accountId),
+    index('ix_contacts_org_owner').on(t.orgId, t.ownerId),
+  ],
+);
+
+export const customFieldDefinitions = pgTable(
+  'custom_field_definitions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    entityType: text('entity_type').$type<'contact' | 'account'>().notNull(),
+    key: text('key').notNull(),
+    label: text('label').notNull(),
+    type: text('type').$type<CustomFieldType>().notNull(),
+    required: boolean('required').notNull().default(false),
+    options: jsonb('options').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uq_custom_fields_org_entity_key').on(t.orgId, t.entityType, t.key)],
+);
+
+export const contactNotes = pgTable(
+  'contact_notes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id, { onDelete: 'cascade' }),
+    authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_notes_org_contact').on(t.orgId, t.contactId)],
+);
+
+export const duplicateCandidates = pgTable(
+  'duplicate_candidates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    entityType: text('entity_type').$type<'contact' | 'account'>().notNull(),
+    recordAId: uuid('record_a_id').notNull(),
+    recordBId: uuid('record_b_id').notNull(),
+    confidence: text('confidence').$type<'exact' | 'high' | 'medium'>().notNull(),
+    signals: jsonb('signals').$type<Record<string, unknown>>().notNull().default({}),
+    status: text('status').$type<'pending' | 'dismissed' | 'merged'>().notNull().default('pending'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('uq_dup_candidate_pair').on(t.orgId, t.entityType, t.recordAId, t.recordBId),
+  ],
+);
+
+export const contactMerges = pgTable('contact_merges', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id')
+    .notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  winnerId: uuid('winner_id').notNull(),
+  loserId: uuid('loser_id').notNull(),
+  loserSnapshot: jsonb('loser_snapshot').$type<Record<string, unknown>>().notNull(),
+  fieldChoices: jsonb('field_choices').$type<Record<string, 'winner' | 'loser'>>().notNull(),
+  mergedBy: uuid('merged_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const importJobs = pgTable('import_jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id')
+    .notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  entityType: text('entity_type').$type<'contact' | 'account'>().notNull().default('contact'),
+  status: text('status')
+    .$type<
+      | 'pending'
+      | 'validating'
+      | 'validated'
+      | 'validation_failed'
+      | 'importing'
+      | 'completed'
+      | 'failed'
+    >()
+    .notNull()
+    .default('pending'),
+  mapping: jsonb('mapping').$type<Record<string, string>>().notNull().default({}),
+  stats: jsonb('stats').$type<Record<string, unknown>>().notNull().default({}),
+  error: text('error'),
+  storageKey: text('storage_key'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+});
 
 export * from './env';
