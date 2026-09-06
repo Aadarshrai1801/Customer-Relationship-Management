@@ -16,6 +16,7 @@ import { NotesModule } from './notes/notes.module';
 import { TimelineModule } from './timeline/timeline.module';
 import { ImportsModule } from './imports/imports.module';
 import { LeadsModule } from './leads/leads.module';
+import { LeadRoutingModule } from './lead-routing/lead-routing.module';
 import { HealthController } from './health/health.controller';
 
 @Module({
@@ -37,6 +38,7 @@ import { HealthController } from './health/health.controller';
     TimelineModule,
     ImportsModule,
     LeadsModule,
+    LeadRoutingModule,
   ],
   controllers: [HealthController],
 })

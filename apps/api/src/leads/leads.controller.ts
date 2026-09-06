@@ -3,6 +3,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Inject,
   Param,
   Patch,
@@ -22,6 +24,10 @@ import {
   type ListLeadsQuery,
   type UpdateLeadInput,
 } from './leads.schemas';
+import {
+  reassignLeadSchema,
+  type ReassignLeadInput,
+} from '../lead-routing/lead-routing.schemas';
 import { LeadsService } from './leads.service';
 
 function authOf(req: Request): NonNullable<Request['auth']> {
@@ -72,4 +78,22 @@ export class LeadsController {
   async remove(@Req() req: Request, @Param('id') id: string): Promise<unknown> {
     return this.leads.remove(authOf(req), id);
   }
+
+  @RequireScopes('leads:manage')
+  @Post(':id/reassign')
+  @HttpCode(HttpStatus.OK)
+  async reassign(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(reassignLeadSchema)) body: unknown,
+  ): Promise<unknown> {
+    return this.leads.reassign(authOf(req), id, body as ReassignLeadInput);
+  }
+
+  @RequireScopes('leads:read')
+  @Get(':id/assignment-history')
+  async assignmentHistory(@Req() req: Request, @Param('id') id: string): Promise<unknown> {
+    return this.leads.getAssignmentHistory(authOf(req), id);
+  }
 }
+

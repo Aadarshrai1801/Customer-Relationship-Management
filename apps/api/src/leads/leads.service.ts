@@ -19,6 +19,8 @@ import {
   validateCustomFields,
 } from '../custom-fields/field-validation';
 import { TenantDb, type NexusDb } from '../database/tenant-db.service';
+import { LeadRoutingService } from '../lead-routing/lead-routing.service';
+import type { ReassignLeadInput } from '../lead-routing/lead-routing.schemas';
 import type {
   CreateLeadInput,
   ListLeadsQuery,
@@ -90,6 +92,7 @@ export class LeadsService {
     @Inject(TenantDb) private readonly tenantDb: TenantDb,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(CustomFieldsService) private readonly fields: CustomFieldsService,
+    @Inject(LeadRoutingService) private readonly routing: LeadRoutingService,
   ) {}
 
   async create(
@@ -192,8 +195,16 @@ export class LeadsService {
         },
       });
 
-      const owner = ownerId
-        ? (await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.id, ownerId)))[0] ?? null
+      if (!ownerId) {
+        const assigned = await this.routing.assignLead(db, auth.org.id, created.id);
+        if (assigned.assignedToUserId) {
+          created.ownerId = assigned.assignedToUserId;
+        }
+      }
+
+      const finalOwnerId = created.ownerId;
+      const owner = finalOwnerId
+        ? (await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.id, finalOwnerId)))[0] ?? null
         : null;
 
       const serialized = await this.serializeOne(db, auth, { lead: created, owner });
@@ -412,6 +423,18 @@ export class LeadsService {
 
       return { ok: true as const };
     });
+  }
+
+  async reassign(
+    auth: AuthContext,
+    id: string,
+    input: ReassignLeadInput,
+  ): Promise<{ ok: true; leadId: string; assignedToUserId: string }> {
+    return this.routing.reassignLead(auth, id, input);
+  }
+
+  async getAssignmentHistory(auth: AuthContext, id: string) {
+    return this.routing.getAssignmentHistory(auth, id);
   }
 
   private recordScope(auth: AuthContext): 'all' | 'own' {
