@@ -11,12 +11,14 @@ import {
   leadRoutingMembers,
   leadRoutingRules,
   leads,
+  notifications,
   repAvailability,
   users,
 } from '@nexus/db';
 import { AuditService } from '../audit/audit.service';
 import type { AuthContext } from '../common/auth-context';
 import { TenantDb, type NexusDb } from '../database/tenant-db.service';
+import { MailService } from '../mail/mail.service';
 import type {
   CreateRoutingRuleInput,
   ReassignLeadInput,
@@ -50,6 +52,7 @@ export class LeadRoutingService {
   constructor(
     @Inject(TenantDb) private readonly tenantDb: TenantDb,
     @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(MailService) private readonly mail: MailService,
   ) {}
 
   async createRule(
@@ -450,6 +453,16 @@ export class LeadRoutingService {
         reason: input.reason ?? 'Manual reassignment by admin',
       });
 
+      const leadTitle = lead.name || lead.company || lead.email;
+      await db.insert(notifications).values({
+        orgId: auth.org.id,
+        userId: targetUser.id,
+        type: 'lead_assigned',
+        title: `Lead Reassigned to You: ${leadTitle}`,
+        body: `Lead ${leadTitle}${lead.company ? ` (${lead.company})` : ''} was reassigned to you by ${auth.user.name}.`,
+        link: `/leads/${lead.id}`,
+      });
+
       await this.audit.record(db, {
         orgId: auth.org.id,
         actorUserId: auth.user.id,
@@ -460,6 +473,21 @@ export class LeadRoutingService {
         newValues: { ownerId: targetUser.id, reason: input.reason },
         oldValues: { ownerId: lead.ownerId },
       });
+
+      try {
+        await this.mail.sendLeadAssignedNotification(
+          targetUser.email,
+          auth.org.name,
+          {
+            id: lead.id,
+            name: lead.name,
+            company: lead.company,
+            email: lead.email,
+          },
+        );
+      } catch (mailErr) {
+        // Non-blocking mail delivery
+      }
 
       return { ok: true as const, leadId, assignedToUserId: targetUser.id };
     });

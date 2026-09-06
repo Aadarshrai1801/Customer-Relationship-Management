@@ -8,6 +8,7 @@ import {
 import { and, desc, eq, gte, ilike, lt, or, sql } from 'drizzle-orm';
 import {
   leads,
+  notifications,
   users,
   type Lead,
 } from '@nexus/db';
@@ -19,6 +20,7 @@ import {
   validateCustomFields,
 } from '../custom-fields/field-validation';
 import { TenantDb, type NexusDb } from '../database/tenant-db.service';
+import { MailService } from '../mail/mail.service';
 import { LeadRoutingService } from '../lead-routing/lead-routing.service';
 import type { ReassignLeadInput } from '../lead-routing/lead-routing.schemas';
 import type {
@@ -93,13 +95,14 @@ export class LeadsService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(CustomFieldsService) private readonly fields: CustomFieldsService,
     @Inject(LeadRoutingService) private readonly routing: LeadRoutingService,
+    @Inject(MailService) private readonly mail: MailService,
   ) {}
 
   async create(
     auth: AuthContext,
     input: CreateLeadInput,
   ): Promise<{ lead: SerializedLead; deduplicated: boolean }> {
-    return this.tenantDb.tx(auth.org.id, async (db) => {
+    const result = await this.tenantDb.tx(auth.org.id, async (db) => {
       const lowerEmail = input.email.toLowerCase().trim();
 
       // 5-minute idempotency / de-duplication window
@@ -178,10 +181,11 @@ export class LeadsService {
 
       if (!created) throw new Error('Failed to create lead');
 
+      const isRealUser = auth.user?.id && auth.user.id.length === 36 && auth.user.id !== '00000000-0000-0000-0000-000000000000';
       await this.audit.record(db, {
         orgId: auth.org.id,
-        actorUserId: auth.user.id,
-        actorEmail: auth.user.email,
+        actorUserId: isRealUser ? auth.user.id : null,
+        actorEmail: auth.user?.email || null,
         action: 'lead.created',
         entityType: 'lead',
         entityId: created.id,
@@ -202,6 +206,18 @@ export class LeadsService {
         }
       }
 
+      if (created.ownerId) {
+        const leadTitle = created.name || created.company || created.email;
+        await db.insert(notifications).values({
+          orgId: auth.org.id,
+          userId: created.ownerId,
+          type: 'lead_assigned',
+          title: `New Lead Assigned: ${leadTitle}`,
+          body: `Lead ${leadTitle}${created.company ? ` (${created.company})` : ''} was assigned to you.`,
+          link: `/leads/${created.id}`,
+        });
+      }
+
       const finalOwnerId = created.ownerId;
       const owner = finalOwnerId
         ? (await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.id, finalOwnerId)))[0] ?? null
@@ -210,6 +226,30 @@ export class LeadsService {
       const serialized = await this.serializeOne(db, auth, { lead: created, owner });
       return { lead: serialized, deduplicated: false };
     });
+
+    if (result.lead.ownerId && !result.deduplicated) {
+      try {
+        const [assignedUser] = await this.tenantDb.tx(auth.org.id, (db) =>
+          db.select({ email: users.email }).from(users).where(eq(users.id, result.lead.ownerId!)),
+        );
+        if (assignedUser?.email) {
+          await this.mail.sendLeadAssignedNotification(
+            assignedUser.email,
+            auth.org.name,
+            {
+              id: result.lead.id,
+              name: result.lead.name,
+              company: result.lead.company,
+              email: result.lead.email,
+            },
+          );
+        }
+      } catch (mailErr) {
+        // Mail delivery is non-blocking
+      }
+    }
+
+    return result;
   }
 
   async list(

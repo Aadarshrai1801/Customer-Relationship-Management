@@ -17,6 +17,8 @@ import { TimelineModule } from './timeline/timeline.module';
 import { ImportsModule } from './imports/imports.module';
 import { LeadsModule } from './leads/leads.module';
 import { LeadRoutingModule } from './lead-routing/lead-routing.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { WebToLeadModule } from './web-to-lead/web-to-lead.module';
 import { HealthController } from './health/health.controller';
 
 @Module({
@@ -39,6 +41,8 @@ import { HealthController } from './health/health.controller';
     ImportsModule,
     LeadsModule,
     LeadRoutingModule,
+    NotificationsModule,
+    WebToLeadModule,
   ],
   controllers: [HealthController],
 })

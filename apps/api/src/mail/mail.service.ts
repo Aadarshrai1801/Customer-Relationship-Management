@@ -69,4 +69,20 @@ export class MailService {
         `${stats.created} created, ${stats.skipped} skipped, ${stats.failed} failed.`,
     });
   }
+
+  async sendLeadAssignedNotification(
+    to: string,
+    orgName: string,
+    lead: { id: string; name?: string | null; company?: string | null; email?: string | null },
+  ): Promise<void> {
+    const leadName = lead.name || lead.company || lead.email || 'New Lead';
+    const link = `${this.webOrigin}/leads/${lead.id}`;
+    await this.transporter.sendMail({
+      from: this.from,
+      to,
+      subject: `[${orgName}] New Lead Assigned: ${leadName}`,
+      text: `A new lead has been assigned to you in ${orgName}:\n\nName: ${lead.name ?? 'N/A'}\nCompany: ${lead.company ?? 'N/A'}\nEmail: ${lead.email ?? 'N/A'}\n\nView lead: ${link}`,
+      html: `<p>A new lead has been assigned to you in <strong>${orgName}</strong>:</p><ul><li><strong>Name:</strong> ${lead.name ?? 'N/A'}</li><li><strong>Company:</strong> ${lead.company ?? 'N/A'}</li><li><strong>Email:</strong> ${lead.email ?? 'N/A'}</li></ul><p><a href="${link}">View Lead in Nexus CRM</a></p>`,
+    });
+  }
 }
