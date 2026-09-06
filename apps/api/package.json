@@ -8,7 +8,8 @@
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "queue:install": "node scripts/install-queue-schema.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
@@ -25,6 +26,7 @@
     "openid-client": "^6.8.8",
     "otplib": "^13.5.0",
     "pg": "^8.16.0",
+    "pg-boss": "^12.30.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.0",
     "zod": "^4.5.4"

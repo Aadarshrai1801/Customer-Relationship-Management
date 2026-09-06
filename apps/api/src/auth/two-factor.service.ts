@@ -19,7 +19,7 @@ import {
 import { TenantDb, type NexusDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
 import { FieldCrypto } from '../crypto/crypto.module';
-import { PasswordService } from './password.service';
+import { PasswordService } from '../crypto/password.service';
 import { AttemptThrottle } from './attempt-throttle.service';
 import { TFA_THROTTLE } from './throttle.tokens';
 import { AuditService } from '../audit/audit.service';

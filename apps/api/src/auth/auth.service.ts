@@ -28,9 +28,9 @@ import {
 import { IdentityDb, TenantDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
 import { SYSTEM_ROLE_SEEDS } from '../rbac/seeds';
-import { PasswordService } from './password.service';
+import { PasswordService } from '../crypto/password.service';
 import { SessionService, type CreatedSession } from './session.service';
-import { MailService } from './mail.service';
+import { MailService } from '../mail/mail.service';
 import { AttemptThrottle } from './attempt-throttle.service';
 import { LOGIN_THROTTLE } from './throttle.tokens';
 import { SsoService } from '../sso/sso.service';

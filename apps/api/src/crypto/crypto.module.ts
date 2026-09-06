@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';
 import { Global, Inject, Injectable, Module } from '@nestjs/common';
+import { PasswordService } from './password.service';
 
 const PREFIX = 'gcm1.';
 const IV_BYTES = 12;
@@ -56,7 +57,11 @@ function loadMasterKey(): Buffer {
 
 @Global()
 @Module({
-  providers: [{ provide: 'FIELD_CRYPTO_MASTER_KEY', useFactory: loadMasterKey }, FieldCrypto],
-  exports: [FieldCrypto],
+  providers: [
+    { provide: 'FIELD_CRYPTO_MASTER_KEY', useFactory: loadMasterKey },
+    FieldCrypto,
+    PasswordService,
+  ],
+  exports: [FieldCrypto, PasswordService],
 })
 export class CryptoModule {}

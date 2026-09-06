@@ -7,8 +7,6 @@ import { AuthService } from './auth.service';
 import { AuthGuard } from './auth.guard';
 import { AttemptThrottle } from './attempt-throttle.service';
 import { LOGIN_THROTTLE, TFA_THROTTLE } from './throttle.tokens';
-import { MailService } from './mail.service';
-import { PasswordService } from './password.service';
 import { TwoFactorController } from './two-factor.controller';
 import { TwoFactorService } from './two-factor.service';
 
@@ -19,8 +17,6 @@ const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
   controllers: [AuthController, TwoFactorController],
   providers: [
     AuthService,
-    PasswordService,
-    MailService,
     TwoFactorService,
     {
       provide: LOGIN_THROTTLE,

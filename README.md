@@ -16,6 +16,7 @@ cp .env.example .env
 # generate a dev encryption key and put it in .env as FIELD_ENCRYPTION_KEY:
 node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 npm run db:migrate
+npm run queue:install -w @nexus/api   # one-time pg-boss schema setup
 npm run dev:api         # API on http://localhost:3001
 ```
 

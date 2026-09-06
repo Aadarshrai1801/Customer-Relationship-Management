@@ -42,4 +42,15 @@ export class MailService {
       html: `<p>You've been invited to join <strong>${orgName}</strong> as ${roleName}.</p><p><a href="${link}">Accept invitation</a> (expires in 7 days).</p>`,
     });
   }
+
+  async sendExportReady(to: string, orgName: string, exportId: string): Promise<void> {
+    const link = `${this.webOrigin}/settings/privacy?export=${exportId}`;
+    await this.transporter.sendMail({
+      from: this.from,
+      to,
+      subject: `Your ${orgName} data export is ready`,
+      text: `Your personal data export for ${orgName} is ready to download (expires in 7 days): ${link}`,
+      html: `<p>Your personal data export for <strong>${orgName}</strong> is ready.</p><p><a href="${link}">Download export</a> (expires in 7 days).</p>`,
+    });
+  }
 }

@@ -36,6 +36,13 @@
       "when": 1788693400710,
       "tag": "0004_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788694148645,
+      "tag": "0005_privacy",
+      "breakpoints": true
     }
   ]
 }

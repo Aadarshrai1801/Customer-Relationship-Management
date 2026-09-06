@@ -39,6 +39,7 @@ jobs:
       - run: npm ci
       - run: npm run build -w @nexus/db
       - run: npm run db:migrate
+      - run: npm run queue:install -w @nexus/api
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check

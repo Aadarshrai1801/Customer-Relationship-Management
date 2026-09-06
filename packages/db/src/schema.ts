@@ -231,6 +231,25 @@ export const sessions = pgTable(
   (t) => [uniqueIndex('uq_sessions_token_hash').on(t.tokenHash)],
 );
 
+export const gdprExports = pgTable('gdpr_exports', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id')
+    .notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  status: text('status')
+    .$type<'pending' | 'processing' | 'ready' | 'failed' | 'expired'>()
+    .notNull()
+    .default('pending'),
+  storageKey: text('storage_key'),
+  fileSize: text('file_size'),
+  checksum: text('checksum'),
+  error: text('error'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+});
+
 export type Organization = typeof organizations.$inferSelect;
 export type NewOrganization = typeof organizations.$inferInsert;
 export type Role = typeof roles.$inferSelect;
@@ -250,5 +269,7 @@ export type NewSsoConfig = typeof ssoConfigs.$inferInsert;
 export type SsoLoginState = typeof ssoLoginStates.$inferSelect;
 export type AuditLogEntry = typeof auditLogEntries.$inferSelect;
 export type NewAuditLogEntry = typeof auditLogEntries.$inferInsert;
+export type GdprExport = typeof gdprExports.$inferSelect;
+export type NewGdprExport = typeof gdprExports.$inferInsert;
 
 export * from './env';
