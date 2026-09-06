@@ -21,7 +21,7 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
     {
       key: 'owner',
       name: 'Owner',
-      permissions: perms(['*'], { user: 'all', contact: 'all', account: 'all' }),
+      permissions: perms(['*'], { user: 'all', contact: 'all', account: 'all', lead: 'all' }),
     },
     {
       key: 'admin',
@@ -42,19 +42,34 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
           'contacts:manage',
           'accounts:read',
           'accounts:manage',
+          'leads:read',
+          'leads:manage',
+          'lead_routing:manage',
+          'notifications:read',
         ],
-        { user: 'all', contact: 'all', account: 'all' },
+        { user: 'all', contact: 'all', account: 'all', lead: 'all' },
       ),
     },
     {
       key: 'manager',
       name: 'Manager',
       permissions: perms(
-        ['users:read', 'org:read', 'custom_fields:read', 'contacts:read', 'accounts:read'],
+        [
+          'users:read',
+          'org:read',
+          'custom_fields:read',
+          'contacts:read',
+          'accounts:read',
+          'leads:read',
+          'leads:manage',
+          'lead_routing:manage',
+          'notifications:read',
+        ],
         {
           user: 'all',
           contact: 'all',
           account: 'all',
+          lead: 'all',
         },
       ),
     },
@@ -69,21 +84,30 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
           'contacts:manage',
           'accounts:read',
           'accounts:manage',
+          'leads:read',
+          'leads:manage',
+          'notifications:read',
         ],
         {
           user: 'own',
           contact: 'own',
           account: 'own',
+          lead: 'own',
         },
       ),
     },
     {
       key: 'viewer',
       name: 'Viewer',
-      permissions: perms(['custom_fields:read', 'contacts:read', 'accounts:read'], {
-        user: 'own',
-        contact: 'own',
-        account: 'own',
-      }),
+      permissions: perms(
+        ['custom_fields:read', 'contacts:read', 'accounts:read', 'leads:read', 'notifications:read'],
+        {
+          user: 'own',
+          contact: 'own',
+          account: 'own',
+          lead: 'own',
+        },
+      ),
     },
   ];
+

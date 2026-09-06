@@ -8,6 +8,7 @@ import {
   index,
   uuid,
   bigserial,
+  integer,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
@@ -284,6 +285,37 @@ export type DuplicateCandidate = typeof duplicateCandidates.$inferSelect;
 export type ContactMerge = typeof contactMerges.$inferSelect;
 export type AccountMerge = typeof accountMerges.$inferSelect;
 export type ImportJob = typeof importJobs.$inferSelect;
+export type Lead = typeof leads.$inferSelect;
+export type NewLead = typeof leads.$inferInsert;
+export type LeadRoutingRule = typeof leadRoutingRules.$inferSelect;
+export type NewLeadRoutingRule = typeof leadRoutingRules.$inferInsert;
+export type LeadRoutingMember = typeof leadRoutingMembers.$inferSelect;
+export type NewLeadRoutingMember = typeof leadRoutingMembers.$inferInsert;
+export type RepAvailability = typeof repAvailability.$inferSelect;
+export type NewRepAvailability = typeof repAvailability.$inferInsert;
+export type LeadAssignmentLog = typeof leadAssignmentLogs.$inferSelect;
+export type NewLeadAssignmentLog = typeof leadAssignmentLogs.$inferInsert;
+export type AppNotification = typeof notifications.$inferSelect;
+export type NewAppNotification = typeof notifications.$inferInsert;
+
+export const LEAD_STATUSES = [
+  'new',
+  'contacted',
+  'qualified',
+  'unqualified',
+  'converted',
+] as const;
+export type LeadStatus = (typeof LEAD_STATUSES)[number];
+
+export const LEAD_SOURCES = [
+  'website',
+  'referral',
+  'organic_search',
+  'paid_search',
+  'event',
+  'other',
+] as const;
+export type LeadSource = (typeof LEAD_SOURCES)[number];
 
 export const LIFECYCLE_STAGES = [
   'lead',
@@ -375,7 +407,7 @@ export const customFieldDefinitions = pgTable(
     orgId: uuid('org_id')
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
-    entityType: text('entity_type').$type<'contact' | 'account'>().notNull(),
+    entityType: text('entity_type').$type<'contact' | 'account' | 'lead'>().notNull(),
     key: text('key').notNull(),
     label: text('label').notNull(),
     type: text('type').$type<CustomFieldType>().notNull(),
@@ -477,4 +509,151 @@ export const importJobs = pgTable('import_jobs', {
   completedAt: timestamp('completed_at', { withTimezone: true }),
 });
 
+export const leads = pgTable(
+  'leads',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    firstName: text('first_name'),
+    lastName: text('last_name'),
+    email: text('email').notNull(),
+    phone: text('phone'),
+    company: text('company'),
+    title: text('title'),
+    status: text('status').$type<LeadStatus>().notNull().default('new'),
+    source: text('source').$type<LeadSource>().notNull().default('website'),
+    utmSource: text('utm_source'),
+    utmMedium: text('utm_medium'),
+    utmCampaign: text('utm_campaign'),
+    utmTerm: text('utm_term'),
+    utmContent: text('utm_content'),
+    referrerUrl: text('referrer_url'),
+    notes: text('notes'),
+    customFields: jsonb('custom_fields').$type<Record<string, unknown>>().notNull().default({}),
+    convertedAt: timestamp('converted_at', { withTimezone: true }),
+    convertedContactId: uuid('converted_contact_id').references(() => contacts.id, {
+      onDelete: 'set null',
+    }),
+    convertedAccountId: uuid('converted_account_id').references(() => accounts.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ix_leads_org_email').on(t.orgId, sql`lower(${t.email})`),
+    index('ix_leads_org_status').on(t.orgId, t.status),
+    index('ix_leads_org_owner').on(t.orgId, t.ownerId),
+    index('ix_leads_org_created').on(t.orgId, t.createdAt),
+  ],
+);
+
+export const leadRoutingRules = pgTable(
+  'lead_routing_rules',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    strategy: text('strategy').$type<'round_robin' | 'manual'>().notNull().default('round_robin'),
+    isActive: boolean('is_active').notNull().default(true),
+    fallbackUserId: uuid('fallback_user_id').references(() => users.id, { onDelete: 'set null' }),
+    lastAssignedIndex: integer('last_assigned_index').notNull().default(-1),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_lead_routing_rules_org').on(t.orgId, t.isActive)],
+);
+
+export const leadRoutingMembers = pgTable(
+  'lead_routing_members',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    ruleId: uuid('rule_id')
+      .notNull()
+      .references(() => leadRoutingRules.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    orderIndex: integer('order_index').notNull().default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('uq_lead_routing_member').on(t.ruleId, t.userId),
+    index('ix_lead_routing_members_rule').on(t.ruleId, t.orderIndex),
+  ],
+);
+
+export const repAvailability = pgTable(
+  'rep_availability',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    isAvailable: boolean('is_available').notNull().default(true),
+    oooReason: text('ooo_reason'),
+    returnAt: timestamp('return_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uq_rep_availability_org_user').on(t.orgId, t.userId)],
+);
+
+export const leadAssignmentLogs = pgTable(
+  'lead_assignment_logs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    leadId: uuid('lead_id')
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    assignedToUserId: uuid('assigned_to_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    assignedByUserId: uuid('assigned_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    ruleId: uuid('rule_id').references(() => leadRoutingRules.id, { onDelete: 'set null' }),
+    strategy: text('strategy').notNull(),
+    reason: text('reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_lead_assignment_logs_lead').on(t.orgId, t.leadId)],
+);
+
+export const notifications = pgTable(
+  'notifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    type: text('type').notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    link: text('link'),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_notifications_user_read').on(t.orgId, t.userId, t.readAt)],
+);
+
 export * from './env';
+
