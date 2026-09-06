@@ -17,9 +17,11 @@ import type { Request } from 'express';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { RequireScopes } from '../rbac/require-scopes.decorator';
 import {
+  convertLeadSchema,
   createLeadSchema,
   listLeadsQuerySchema,
   updateLeadSchema,
+  type ConvertLeadInput,
   type CreateLeadInput,
   type ListLeadsQuery,
   type UpdateLeadInput,
@@ -94,6 +96,17 @@ export class LeadsController {
   @Get(':id/assignment-history')
   async assignmentHistory(@Req() req: Request, @Param('id') id: string): Promise<unknown> {
     return this.leads.getAssignmentHistory(authOf(req), id);
+  }
+
+  @RequireScopes('leads:manage')
+  @Post(':id/convert')
+  @HttpCode(HttpStatus.OK)
+  async convert(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(convertLeadSchema)) body: unknown,
+  ): Promise<unknown> {
+    return this.leads.convert(authOf(req), id, (body ?? {}) as ConvertLeadInput);
   }
 }
 

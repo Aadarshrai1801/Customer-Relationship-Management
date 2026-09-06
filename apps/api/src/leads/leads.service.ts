@@ -5,8 +5,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, desc, eq, gte, ilike, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, ilike, isNull, lt, or, sql } from 'drizzle-orm';
 import {
+  accounts,
+  contactNotes,
+  contacts,
   leads,
   notifications,
   users,
@@ -24,6 +27,7 @@ import { MailService } from '../mail/mail.service';
 import { LeadRoutingService } from '../lead-routing/lead-routing.service';
 import type { ReassignLeadInput } from '../lead-routing/lead-routing.schemas';
 import type {
+  ConvertLeadInput,
   CreateLeadInput,
   ListLeadsQuery,
   UpdateLeadInput,
@@ -475,6 +479,261 @@ export class LeadsService {
 
   async getAssignmentHistory(auth: AuthContext, id: string) {
     return this.routing.getAssignmentHistory(auth, id);
+  }
+
+  async convert(
+    auth: AuthContext,
+    id: string,
+    input: ConvertLeadInput = {},
+  ): Promise<{
+    ok: true;
+    lead: SerializedLead;
+    contact: { id: string; name: string; email: string };
+    account: { id: string; name: string } | null;
+  }> {
+    return this.tenantDb.tx(auth.org.id, async (db) => {
+      const [lead] = await db
+        .select()
+        .from(leads)
+        .where(and(eq(leads.id, id), eq(leads.orgId, auth.org.id)));
+
+      if (!lead) {
+        throw new NotFoundException({ message: 'Lead not found', code: 'LEAD_NOT_FOUND' });
+      }
+
+      if (lead.status === 'converted' || lead.convertedAt) {
+        throw new BadRequestException({
+          message: 'Lead is already converted',
+          code: 'LEAD_ALREADY_CONVERTED',
+        });
+      }
+
+      const scope = this.recordScope(auth);
+      if (scope === 'own' && lead.ownerId !== auth.user.id) {
+        recordForbidden();
+      }
+
+      // 1. Resolve / Create Account
+      let targetAccountId: string | null = input.accountId ?? null;
+      let targetAccount: { id: string; name: string } | null = null;
+
+      if (targetAccountId) {
+        const [acc] = await db
+          .select({ id: accounts.id, name: accounts.name })
+          .from(accounts)
+          .where(
+            and(
+              eq(accounts.id, targetAccountId),
+              eq(accounts.orgId, auth.org.id),
+              isNull(accounts.deletedAt),
+            ),
+          );
+        if (!acc) {
+          throw new BadRequestException({
+            message: 'Selected account not found',
+            code: 'ACCOUNT_NOT_FOUND',
+          });
+        }
+        targetAccount = acc;
+      } else {
+        const candidateAccountName = input.accountName?.trim() || lead.company?.trim();
+        if (candidateAccountName) {
+          const [existingAcc] = await db
+            .select({ id: accounts.id, name: accounts.name })
+            .from(accounts)
+            .where(
+              and(
+                eq(accounts.orgId, auth.org.id),
+                eq(sql`lower(${accounts.name})`, candidateAccountName.toLowerCase()),
+                isNull(accounts.deletedAt),
+              ),
+            );
+
+          if (existingAcc) {
+            targetAccountId = existingAcc.id;
+            targetAccount = existingAcc;
+          } else {
+            const [newAcc] = await db
+              .insert(accounts)
+              .values({
+                orgId: auth.org.id,
+                name: candidateAccountName,
+                phone: lead.phone,
+                ownerId: lead.ownerId,
+              })
+              .returning({ id: accounts.id, name: accounts.name });
+
+            targetAccountId = newAcc!.id;
+            targetAccount = newAcc!;
+
+            await this.audit.record(db, {
+              orgId: auth.org.id,
+              actorUserId: auth.user.id,
+              actorEmail: auth.user.email,
+              action: 'account.created',
+              entityType: 'account',
+              entityId: targetAccountId,
+              newValues: { name: candidateAccountName, ownerId: lead.ownerId },
+            });
+          }
+        }
+      }
+
+      // 2. Resolve / Create Contact
+      let targetContactId: string | null = input.contactId ?? null;
+      let targetContact: { id: string; name: string; email: string } | null = null;
+
+      if (targetContactId) {
+        const [ct] = await db
+          .select({ id: contacts.id, name: contacts.name, email: contacts.email })
+          .from(contacts)
+          .where(
+            and(
+              eq(contacts.id, targetContactId),
+              eq(contacts.orgId, auth.org.id),
+              isNull(contacts.deletedAt),
+            ),
+          );
+        if (!ct) {
+          throw new BadRequestException({
+            message: 'Selected contact not found',
+            code: 'CONTACT_NOT_FOUND',
+          });
+        }
+        targetContact = ct;
+
+        if (targetAccountId) {
+          await db
+            .update(contacts)
+            .set({ accountId: targetAccountId, updatedAt: new Date() })
+            .where(and(eq(contacts.id, targetContactId), isNull(contacts.accountId)));
+        }
+      } else {
+        const lowerEmail = lead.email.toLowerCase().trim();
+        const [existingCt] = await db
+          .select({ id: contacts.id, name: contacts.name, email: contacts.email })
+          .from(contacts)
+          .where(
+            and(
+              eq(contacts.orgId, auth.org.id),
+              eq(sql`lower(${contacts.email})`, lowerEmail),
+              isNull(contacts.deletedAt),
+            ),
+          );
+
+        if (existingCt) {
+          targetContactId = existingCt.id;
+          targetContact = existingCt;
+
+          if (targetAccountId) {
+            await db
+              .update(contacts)
+              .set({ accountId: targetAccountId, updatedAt: new Date() })
+              .where(and(eq(contacts.id, targetContactId), isNull(contacts.accountId)));
+          }
+        } else {
+          // Map lead custom fields to contact definitions
+          const contactDefs = await this.fields.loadDefinitions(db, auth.org.id, 'contact');
+          const contactDefKeys = new Set(contactDefs.map((d) => d.key));
+          const mappedCustomFields: Record<string, unknown> = {};
+          if (lead.customFields && typeof lead.customFields === 'object') {
+            for (const [k, v] of Object.entries(lead.customFields)) {
+              if (contactDefKeys.has(k)) {
+                mappedCustomFields[k] = v;
+              }
+            }
+          }
+
+          const [newCt] = await db
+            .insert(contacts)
+            .values({
+              orgId: auth.org.id,
+              accountId: targetAccountId,
+              ownerId: lead.ownerId,
+              name: lead.name,
+              firstName: lead.firstName,
+              lastName: lead.lastName,
+              email: lowerEmail,
+              phone: lead.phone,
+              title: lead.title,
+              lifecycleStage: 'lead',
+              customFields: mappedCustomFields,
+            })
+            .returning({ id: contacts.id, name: contacts.name, email: contacts.email });
+
+          targetContactId = newCt!.id;
+          targetContact = newCt!;
+
+          await this.audit.record(db, {
+            orgId: auth.org.id,
+            actorUserId: auth.user.id,
+            actorEmail: auth.user.email,
+            action: 'contact.created',
+            entityType: 'contact',
+            entityId: targetContactId,
+            newValues: {
+              name: lead.name,
+              email: lowerEmail,
+              accountId: targetAccountId,
+              ownerId: lead.ownerId,
+            },
+          });
+        }
+      }
+
+      // 3. Preserve notes as Contact Note
+      if (lead.notes && lead.notes.trim() && targetContactId) {
+        await db.insert(contactNotes).values({
+          orgId: auth.org.id,
+          contactId: targetContactId,
+          authorId: auth.user.id,
+          body: `[Converted from Lead]\n${lead.notes.trim()}`,
+        });
+      }
+
+      // 4. Update Lead to converted
+      const now = new Date();
+      const [updatedLead] = await db
+        .update(leads)
+        .set({
+          status: 'converted',
+          convertedAt: now,
+          convertedContactId: targetContactId,
+          convertedAccountId: targetAccountId,
+          updatedAt: now,
+        })
+        .where(eq(leads.id, lead.id))
+        .returning();
+
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: 'lead.converted',
+        entityType: 'lead',
+        entityId: lead.id,
+        newValues: {
+          status: 'converted',
+          convertedContactId: targetContactId,
+          convertedAccountId: targetAccountId,
+          convertedAt: now,
+        },
+        oldValues: { status: lead.status },
+      });
+
+      const owner = updatedLead!.ownerId
+        ? (await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.id, updatedLead!.ownerId)))[0] ?? null
+        : null;
+
+      const serialized = await this.serializeOne(db, auth, { lead: updatedLead!, owner });
+
+      return {
+        ok: true as const,
+        lead: serialized,
+        contact: targetContact!,
+        account: targetAccount,
+      };
+    });
   }
 
   private recordScope(auth: AuthContext): 'all' | 'own' {

@@ -60,6 +60,15 @@ export const listLeadsQuerySchema = z
   })
   .strict();
 
+export const convertLeadSchema = z
+  .object({
+    accountId: z.string().uuid().optional(),
+    accountName: z.string().trim().max(200).optional(),
+    contactId: z.string().uuid().optional(),
+  })
+  .strict();
+
 export type CreateLeadInput = z.infer<typeof createLeadSchema>;
 export type UpdateLeadInput = z.infer<typeof updateLeadSchema>;
 export type ListLeadsQuery = z.infer<typeof listLeadsQuerySchema>;
+export type ConvertLeadInput = z.infer<typeof convertLeadSchema>;
