@@ -9,6 +9,7 @@ import { and, eq } from 'drizzle-orm';
 import { roles, users, type Role } from '@nexus/db';
 import { TenantDb, type NexusDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
+import { AuditService, diffObjects } from '../audit/audit.service';
 import type { CreateRoleInput, UpdateRoleInput } from './roles.schemas';
 
 export interface SerializedRole {
@@ -33,7 +34,10 @@ function serialize(role: Role): SerializedRole {
 
 @Injectable()
 export class RolesService {
-  constructor(@Inject(TenantDb) private readonly tenantDb: TenantDb) {}
+  constructor(
+    @Inject(TenantDb) private readonly tenantDb: TenantDb,
+    @Inject(AuditService) private readonly audit: AuditService,
+  ) {}
 
   async list(auth: AuthContext): Promise<SerializedRole[]> {
     return this.tenantDb.tx(auth.org.id, async (db) => {
@@ -65,6 +69,15 @@ export class RolesService {
         })
         .returning();
       if (!created) throw new Error('Failed to create role');
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: 'role.created',
+        entityType: 'role',
+        entityId: created.id,
+        newValues: { key: created.key, name: created.name },
+      });
       return serialize(created);
     });
   }
@@ -87,6 +100,22 @@ export class RolesService {
         .where(eq(roles.id, role.id))
         .returning();
       if (!updated) throw new Error('Failed to update role');
+      const { oldValues, newValues } = diffObjects(
+        { name: role.name, permissions: role.permissions },
+        { name: updated.name, permissions: updated.permissions },
+      );
+      if (Object.keys(newValues).length > 0) {
+        await this.audit.record(db, {
+          orgId: auth.org.id,
+          actorUserId: auth.user.id,
+          actorEmail: auth.user.email,
+          action: 'role.updated',
+          entityType: 'role',
+          entityId: updated.id,
+          oldValues,
+          newValues,
+        });
+      }
       return serialize(updated);
     });
   }
@@ -114,6 +143,15 @@ export class RolesService {
         });
       }
       await db.delete(roles).where(eq(roles.id, role.id));
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: 'role.deleted',
+        entityType: 'role',
+        entityId: role.id,
+        oldValues: { key: role.key, name: role.name },
+      });
       return { ok: true as const };
     });
   }

@@ -22,6 +22,7 @@ import { FieldCrypto } from '../crypto/crypto.module';
 import { PasswordService } from './password.service';
 import { AttemptThrottle } from './attempt-throttle.service';
 import { TFA_THROTTLE } from './throttle.tokens';
+import { AuditService } from '../audit/audit.service';
 import type { EnableTwoFactorInput, VerifyTwoFactorInput } from './two-factor.schemas';
 
 const SECRET_PURPOSE = '2fa-secret-v1';
@@ -51,6 +52,7 @@ export class TwoFactorService {
     @Inject(FieldCrypto) private readonly crypto: FieldCrypto,
     @Inject(PasswordService) private readonly passwords: PasswordService,
     @Inject(TFA_THROTTLE) private readonly throttle: AttemptThrottle,
+    @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
   async setup(auth: AuthContext): Promise<{ secret: string; otpauthUrl: string }> {
@@ -118,6 +120,15 @@ export class TwoFactorService {
         })
         .where(eq(twoFactor.userId, auth.user.id));
       await this.markSessionVerified(db, auth.sessionId);
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: '2fa.enabled',
+        entityType: 'user',
+        entityId: auth.user.id,
+        newValues: { method: 'totp' },
+      });
     });
     return { backupCodes, verified: true };
   }
@@ -141,6 +152,15 @@ export class TwoFactorService {
     }
     if (!ok) {
       this.throttle.recordFailure(throttleKey);
+      await this.audit.record({
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: 'auth.2fa.failed',
+        entityType: 'user',
+        entityId: auth.user.id,
+        newValues: { via: input.backupCode ? 'backup_code' : 'totp' },
+      });
       throw new UnauthorizedException({
         message: 'Invalid two-factor code',
         code: 'INVALID_TWO_FACTOR_CODE',
@@ -148,14 +168,31 @@ export class TwoFactorService {
     }
     this.throttle.recordSuccess(throttleKey);
     await this.tenantDb.tx(auth.org.id, (db) => this.markSessionVerified(db, auth.sessionId));
+    await this.audit.record({
+      orgId: auth.org.id,
+      actorUserId: auth.user.id,
+      actorEmail: auth.user.email,
+      action: 'auth.2fa.verified',
+      entityType: 'user',
+      entityId: auth.user.id,
+      newValues: { via: input.backupCode ? 'backup_code' : 'totp' },
+    });
     return { verified: true as const };
   }
 
   async disable(auth: AuthContext, password: string): Promise<void> {
     await this.assertPassword(auth, password);
-    await this.tenantDb.tx(auth.org.id, (db) =>
-      db.delete(twoFactor).where(eq(twoFactor.userId, auth.user.id)),
-    );
+    await this.tenantDb.tx(auth.org.id, async (db) => {
+      await db.delete(twoFactor).where(eq(twoFactor.userId, auth.user.id));
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: '2fa.disabled',
+        entityType: 'user',
+        entityId: auth.user.id,
+      });
+    });
   }
 
   async regenerateCodes(auth: AuthContext, password: string): Promise<{ backupCodes: string[] }> {
@@ -168,8 +205,8 @@ export class TwoFactorService {
     }
     await this.assertPassword(auth, password);
     const backupCodes = newBackupCodes();
-    await this.tenantDb.tx(auth.org.id, (db) =>
-      db
+    await this.tenantDb.tx(auth.org.id, async (db) => {
+      await db
         .update(twoFactor)
         .set({
           backupCodes: this.crypto.encrypt(
@@ -178,8 +215,16 @@ export class TwoFactorService {
           ),
           updatedAt: new Date(),
         })
-        .where(eq(twoFactor.userId, auth.user.id)),
-    );
+        .where(eq(twoFactor.userId, auth.user.id));
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: '2fa.backup_codes_regenerated',
+        entityType: 'user',
+        entityId: auth.user.id,
+      });
+    });
     return { backupCodes };
   }
 

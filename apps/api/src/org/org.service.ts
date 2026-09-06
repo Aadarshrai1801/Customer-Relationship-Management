@@ -3,11 +3,15 @@ import { and, eq } from 'drizzle-orm';
 import { organizations, ssoConfigs } from '@nexus/db';
 import { TenantDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
+import { AuditService, diffObjects } from '../audit/audit.service';
 import type { UpdateSecurityInput } from './org.schemas';
 
 @Injectable()
 export class OrgService {
-  constructor(@Inject(TenantDb) private readonly tenantDb: TenantDb) {}
+  constructor(
+    @Inject(TenantDb) private readonly tenantDb: TenantDb,
+    @Inject(AuditService) private readonly audit: AuditService,
+  ) {}
 
   async get(auth: AuthContext): Promise<unknown> {
     const [org] = await this.tenantDb.tx(auth.org.id, (db) =>
@@ -57,6 +61,30 @@ export class OrgService {
         })
         .where(eq(organizations.id, org.id))
         .returning();
+      if (next) {
+        const { oldValues, newValues } = diffObjects(
+          {
+            twoFactorPolicy: org.securitySettings.twoFactorPolicy,
+            ssoOnly: org.securitySettings.ssoOnly,
+          },
+          {
+            twoFactorPolicy: next.securitySettings.twoFactorPolicy,
+            ssoOnly: next.securitySettings.ssoOnly,
+          },
+        );
+        if (Object.keys(newValues).length > 0) {
+          await this.audit.record(db, {
+            orgId: org.id,
+            actorUserId: auth.user.id,
+            actorEmail: auth.user.email,
+            action: 'org.security_updated',
+            entityType: 'organization',
+            entityId: org.id,
+            oldValues,
+            newValues,
+          });
+        }
+      }
       return next;
     });
     if (!updated) throw new Error('Failed to update workspace');

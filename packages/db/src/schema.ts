@@ -1,4 +1,13 @@
-import { boolean, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+  bigserial,
+} from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 export interface OrganizationSettings {
@@ -183,6 +192,23 @@ export const ssoLoginStates = pgTable(
   (t) => [uniqueIndex('uq_sso_login_states_state_hash').on(t.stateHash)],
 );
 
+export const auditLogEntries = pgTable('audit_log_entries', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  orgId: uuid('org_id')
+    .notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+  actorEmail: text('actor_email'),
+  action: text('action').notNull(),
+  entityType: text('entity_type').notNull(),
+  entityId: text('entity_id'),
+  oldValues: jsonb('old_values').$type<Record<string, unknown> | null>(),
+  newValues: jsonb('new_values').$type<Record<string, unknown> | null>(),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const sessions = pgTable(
   'sessions',
   {
@@ -222,5 +248,7 @@ export type NewTwoFactor = typeof twoFactor.$inferInsert;
 export type SsoConfig = typeof ssoConfigs.$inferSelect;
 export type NewSsoConfig = typeof ssoConfigs.$inferInsert;
 export type SsoLoginState = typeof ssoLoginStates.$inferSelect;
+export type AuditLogEntry = typeof auditLogEntries.$inferSelect;
+export type NewAuditLogEntry = typeof auditLogEntries.$inferInsert;
 
 export * from './env';

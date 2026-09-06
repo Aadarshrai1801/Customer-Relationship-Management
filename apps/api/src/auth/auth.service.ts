@@ -34,6 +34,7 @@ import { MailService } from './mail.service';
 import { AttemptThrottle } from './attempt-throttle.service';
 import { LOGIN_THROTTLE } from './throttle.tokens';
 import { SsoService } from '../sso/sso.service';
+import { AuditService } from '../audit/audit.service';
 import { generateToken, hashToken } from './tokens';
 import type { PublicOrg, PublicUser, TwoFactorState } from './auth-shapes';
 import { toPublicOrg, toPublicUser } from './auth-shapes';
@@ -61,6 +62,7 @@ export class AuthService {
     @Inject(MailService) private readonly mail: MailService,
     @Inject(LOGIN_THROTTLE) private readonly loginThrottle: AttemptThrottle,
     @Inject(SsoService) private readonly sso: SsoService,
+    @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
   async signup(
@@ -108,6 +110,25 @@ export class AuthService {
 
     const { session, twoFactor } = await this.issueSession(user, org, meta);
 
+    await this.audit.record({
+      orgId: org.id,
+      actorUserId: user.id,
+      actorEmail: user.email,
+      action: 'org.created',
+      entityType: 'organization',
+      entityId: org.id,
+      newValues: { name: org.name, slug: org.slug },
+    });
+    await this.audit.record({
+      orgId: org.id,
+      actorUserId: user.id,
+      actorEmail: user.email,
+      action: 'user.created',
+      entityType: 'user',
+      entityId: user.id,
+      newValues: { email: user.email, name: user.name, roleKey: 'owner' },
+    });
+
     return {
       user: { ...toPublicUser(user, ownerRole), twoFactorEnrolled: twoFactor.enrolled },
       org: toPublicOrg(org),
@@ -135,8 +156,23 @@ export class AuthService {
       .innerJoin(roles, eq(users.roleId, roles.id))
       .where(sql`lower(${users.email}) = ${input.email}`);
 
-    const invalid = (): never => {
+    const failLogin = async (
+      userId: string | null,
+      orgId: string | null,
+      reason: string,
+    ): Promise<never> => {
       this.loginThrottle.recordFailure(throttleKey);
+      if (orgId) {
+        await this.audit.record({
+          orgId,
+          actorUserId: userId,
+          actorEmail: input.email,
+          action: 'auth.login.failed',
+          entityType: 'user',
+          entityId: userId,
+          newValues: { reason },
+        });
+      }
       throw new UnauthorizedException({
         message: 'Invalid email or password',
         code: 'INVALID_CREDENTIALS',
@@ -146,7 +182,7 @@ export class AuthService {
     let match = matches[0];
     if (input.orgSlug) {
       match = matches.find((m) => m.org.slug.toLowerCase() === input.orgSlug!.toLowerCase());
-      if (!match) invalid();
+      if (!match) await failLogin(null, null, 'unknown_workspace');
     } else if (matches.length > 1) {
       throw new ConflictException({
         message: 'This email belongs to multiple workspaces. Choose one.',
@@ -154,14 +190,25 @@ export class AuthService {
         orgs: matches.map((m) => ({ slug: m.org.slug, name: m.org.name, status: m.user.status })),
       });
     } else if (!match) {
-      invalid();
+      await failLogin(null, null, 'unknown_email');
     }
     const { user, org, role } = match!;
 
     if (user.status === 'suspended') {
+      this.loginThrottle.recordFailure(throttleKey);
+      await this.audit.record({
+        orgId: org.id,
+        actorUserId: user.id,
+        actorEmail: user.email,
+        action: 'auth.login.failed',
+        entityType: 'user',
+        entityId: user.id,
+        newValues: { reason: 'suspended' },
+      });
       throw new ForbiddenException({ message: 'Account suspended', code: 'ACCOUNT_SUSPENDED' });
     }
     if (await this.sso.isSsoOnly(org.id)) {
+      this.loginThrottle.recordFailure(throttleKey);
       throw new ForbiddenException({
         message: 'Single sign-on is required for this workspace',
         code: 'SSO_REQUIRED',
@@ -169,16 +216,33 @@ export class AuthService {
     }
     if (!user.passwordHash) {
       this.loginThrottle.recordFailure(throttleKey);
+      await this.audit.record({
+        orgId: org.id,
+        actorUserId: user.id,
+        actorEmail: user.email,
+        action: 'auth.login.failed',
+        entityType: 'user',
+        entityId: user.id,
+        newValues: { reason: 'password_auth_disabled' },
+      });
       throw new UnauthorizedException({
         message: 'Password sign-in is disabled for this account',
         code: 'PASSWORD_AUTH_DISABLED',
       });
     }
     const ok = await this.passwords.verify(user.passwordHash, input.password);
-    if (!ok) invalid();
+    if (!ok) await failLogin(user.id, org.id, 'bad_password');
 
     this.loginThrottle.recordSuccess(throttleKey);
     const { session, twoFactor } = await this.issueSession(user, org, meta);
+    await this.audit.record({
+      orgId: org.id,
+      actorUserId: user.id,
+      actorEmail: user.email,
+      action: 'auth.login.success',
+      entityType: 'user',
+      entityId: user.id,
+    });
     return {
       user: { ...toPublicUser(user, role), twoFactorEnrolled: twoFactor.enrolled },
       org: toPublicOrg(org),
@@ -215,6 +279,14 @@ export class AuthService {
 
   async logout(auth: AuthContext): Promise<void> {
     await this.sessions.revokeSession(auth.sessionId, auth.org.id);
+    await this.audit.record({
+      orgId: auth.org.id,
+      actorUserId: auth.user.id,
+      actorEmail: auth.user.email,
+      action: 'auth.logout',
+      entityType: 'user',
+      entityId: auth.user.id,
+    });
   }
 
   me(auth: AuthContext): { user: PublicUser; org: PublicOrg } {
@@ -250,6 +322,14 @@ export class AuthService {
         userId: user.id,
         tokenHash: hashToken(token),
         expiresAt: new Date(Date.now() + RESET_TTL_MS),
+      });
+      await this.audit.record({
+        orgId: org.id,
+        actorUserId: user.id,
+        actorEmail: user.email,
+        action: 'auth.password_reset.requested',
+        entityType: 'user',
+        entityId: user.id,
       });
       await this.mail.sendPasswordReset(user.email, org.name, token);
     }
@@ -306,6 +386,15 @@ export class AuthService {
         .update(sessions)
         .set({ revokedAt: new Date() })
         .where(and(eq(sessions.userId, userRow.user.id), isNull(sessions.revokedAt)));
+      await this.audit.record(db, {
+        orgId: userRow.org.id,
+        actorUserId: userRow.user.id,
+        actorEmail: userRow.user.email,
+        action: 'auth.password_reset.completed',
+        entityType: 'user',
+        entityId: userRow.user.id,
+        newValues: { sessionsRevoked: true },
+      });
     });
   }
 
@@ -358,6 +447,15 @@ export class AuthService {
           expiresAt: emailInvites.expiresAt,
         });
       if (!invite) throw new Error('Failed to create invite');
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: 'invite.created',
+        entityType: 'invite',
+        entityId: invite.id,
+        newValues: { email: invite.email, roleKey: role.key },
+      });
       await this.mail.sendInvite(invite.email, auth.org.name, role.name, token);
       return { id: invite.id, email: invite.email, roleKey: role.key, expiresAt: invite.expiresAt };
     });
@@ -434,6 +532,23 @@ export class AuthService {
         .update(emailInvites)
         .set({ acceptedAt: new Date() })
         .where(eq(emailInvites.id, invite.id));
+      await this.audit.record(db, {
+        orgId: invite.org.id,
+        actorUserId: user.id,
+        actorEmail: user.email,
+        action: 'invite.accepted',
+        entityType: 'invite',
+        entityId: invite.id,
+      });
+      await this.audit.record(db, {
+        orgId: invite.org.id,
+        actorUserId: user.id,
+        actorEmail: user.email,
+        action: 'user.created',
+        entityType: 'user',
+        entityId: user.id,
+        newValues: { email: user.email, name: user.name, roleKey: invite.role.key },
+      });
       return user;
     });
 

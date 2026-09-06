@@ -10,6 +10,7 @@ import { and, eq } from 'drizzle-orm';
 import { roles, users, type Role, type User } from '@nexus/db';
 import { TenantDb, type NexusDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
+import { AuditService, diffObjects } from '../audit/audit.service';
 import {
   assertEditableFields,
   checkRecordAccess,
@@ -65,7 +66,10 @@ function serialize(
 
 @Injectable()
 export class UsersService {
-  constructor(@Inject(TenantDb) private readonly tenantDb: TenantDb) {}
+  constructor(
+    @Inject(TenantDb) private readonly tenantDb: TenantDb,
+    @Inject(AuditService) private readonly audit: AuditService,
+  ) {}
 
   async list(auth: AuthContext): Promise<SerializedUser[]> {
     return this.tenantDb.tx(auth.org.id, async (db) => {
@@ -132,6 +136,22 @@ export class UsersService {
         .where(eq(users.id, row.user.id))
         .returning();
       if (!updated) throw new Error('Failed to update user');
+      const { oldValues, newValues } = diffObjects(
+        { name: row.user.name, timezone: row.user.timezone },
+        { name: updated.name, timezone: updated.timezone },
+      );
+      if (Object.keys(newValues).length > 0) {
+        await this.audit.record(db, {
+          orgId: auth.org.id,
+          actorUserId: auth.user.id,
+          actorEmail: auth.user.email,
+          action: 'user.updated',
+          entityType: 'user',
+          entityId: updated.id,
+          oldValues,
+          newValues,
+        });
+      }
       return serialize(auth, updated, row.role);
     });
   }
@@ -170,6 +190,16 @@ export class UsersService {
       }
       if (row.user.roleId !== role.id) {
         await db.update(users).set({ roleId: role.id }).where(eq(users.id, row.user.id));
+        await this.audit.record(db, {
+          orgId: auth.org.id,
+          actorUserId: auth.user.id,
+          actorEmail: auth.user.email,
+          action: 'user.role_changed',
+          entityType: 'user',
+          entityId: row.user.id,
+          oldValues: { roleKey: row.role.key },
+          newValues: { roleKey: role.key },
+        });
       }
       const refreshed = await this.findInOrg(db, auth.org.id, id);
       if (!refreshed) throw new Error('Failed to reload user');
@@ -199,6 +229,16 @@ export class UsersService {
         .where(eq(users.id, row.user.id))
         .returning();
       if (!updated) throw new Error('Failed to update user');
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: 'user.status_changed',
+        entityType: 'user',
+        entityId: updated.id,
+        oldValues: { status: row.user.status },
+        newValues: { status },
+      });
       return serialize(auth, updated, row.role);
     });
   }

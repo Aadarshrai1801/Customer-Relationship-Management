@@ -21,6 +21,7 @@ import {
 } from '@nexus/db';
 import { IdentityDb, TenantDb, type NexusDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
+import { AuditService, diffObjects } from '../audit/audit.service';
 import { FieldCrypto } from '../crypto/crypto.module';
 import { SessionService } from '../auth/session.service';
 import type { CreatedSession } from '../auth/session.service';
@@ -162,6 +163,7 @@ export class SsoService {
     @Inject(TenantDb) private readonly tenantDb: TenantDb,
     @Inject(FieldCrypto) private readonly crypto: FieldCrypto,
     @Inject(SessionService) private readonly sessions: SessionService,
+    @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
   apiOrigin(): string {
@@ -287,6 +289,19 @@ export class SsoService {
         })
         .returning();
       if (!created) throw new Error('Failed to create SSO config');
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: 'sso.config.created',
+        entityType: 'sso_config',
+        entityId: created.id,
+        newValues: {
+          provider: created.provider,
+          domains: created.domains,
+          defaultRoleKey: created.defaultRoleKey,
+        },
+      });
       return this.redact(created);
     });
   }
@@ -311,7 +326,8 @@ export class SsoService {
         await this.assertDefaultRole(db, auth.org.id, input.defaultRoleKey);
       }
       let json = this.decryptConfig(row);
-      if (input.oidc || input.saml) {
+      const secretsRotated = !!(input.oidc || input.saml);
+      if (secretsRotated) {
         json = await this.buildConfigJson({
           provider: row.provider,
           domains: row.domains,
@@ -338,6 +354,26 @@ export class SsoService {
         .where(eq(ssoConfigs.id, row.id))
         .returning();
       if (!updated) throw new Error('Failed to update SSO config');
+      const { oldValues, newValues } = diffObjects(
+        { enabled: row.enabled, domains: row.domains, defaultRoleKey: row.defaultRoleKey },
+        {
+          enabled: updated.enabled,
+          domains: updated.domains,
+          defaultRoleKey: updated.defaultRoleKey,
+        },
+      );
+      if (Object.keys(newValues).length > 0 || secretsRotated) {
+        await this.audit.record(db, {
+          orgId: auth.org.id,
+          actorUserId: auth.user.id,
+          actorEmail: auth.user.email,
+          action: 'sso.config.updated',
+          entityType: 'sso_config',
+          entityId: updated.id,
+          oldValues,
+          newValues: secretsRotated ? { ...newValues, credentialsRotated: true } : newValues,
+        });
+      }
       return this.redact(updated);
     });
   }
@@ -358,6 +394,15 @@ export class SsoService {
         await this.assertDisablingAllowed(db, auth.org.id, row.id);
       }
       await db.delete(ssoConfigs).where(eq(ssoConfigs.id, row.id));
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: 'sso.config.deleted',
+        entityType: 'sso_config',
+        entityId: row.id,
+        oldValues: { provider: row.provider },
+      });
       return { ok: true as const };
     });
   }
@@ -458,6 +503,7 @@ export class SsoService {
       if (match?.user.status === 'suspended') {
         throw new ForbiddenException({ message: 'Account suspended', code: 'ACCOUNT_SUSPENDED' });
       }
+      const mode: 'linked' | 'provisioned' = match ? 'linked' : 'provisioned';
       if (match) {
         if (match.user.ssoSubject !== input.subject || match.user.ssoProvider !== input.provider) {
           await db
@@ -466,6 +512,15 @@ export class SsoService {
             .where(eq(users.id, match.user.id));
         }
         const [tfa] = await db.select().from(twoFactor).where(eq(twoFactor.userId, match.user.id));
+        await this.audit.record(db, {
+          orgId: input.orgId,
+          actorUserId: match.user.id,
+          actorEmail: match.user.email,
+          action: 'auth.sso.login',
+          entityType: 'user',
+          entityId: match.user.id,
+          newValues: { provider: input.provider, mode },
+        });
         return { user: match.user, org, role: match.role, enrolled: !!tfa?.enabledAt };
       }
       const [config] = await db
@@ -508,6 +563,20 @@ export class SsoService {
         })
         .returning();
       if (!created) throw new Error('Failed to provision SSO user');
+      await this.audit.record(db, {
+        orgId: input.orgId,
+        actorUserId: created.id,
+        actorEmail: created.email,
+        action: 'auth.sso.login',
+        entityType: 'user',
+        entityId: created.id,
+        newValues: {
+          provider: input.provider,
+          mode: 'provisioned',
+          email: created.email,
+          roleKey: role.key,
+        },
+      });
       return { user: created, org, role, enrolled: false };
     });
 
