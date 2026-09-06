@@ -23,6 +23,13 @@ import { SsoPage } from './pages/settings/sso';
 import { OrgPage } from './pages/settings/org';
 import { AuditPage } from './pages/settings/audit';
 import { PrivacyPage } from './pages/settings/privacy';
+import { CustomFieldsAdminPage } from './pages/settings/custom-fields';
+import { ContactsListPage } from './pages/contacts/contacts-list';
+import { ContactDetailPage } from './pages/contacts/contact-detail';
+import { AccountsListPage } from './pages/accounts/accounts-list';
+import { AccountDetailPage } from './pages/accounts/account-detail';
+import { DedupQueuePage } from './pages/duplicates/dedup-queue';
+import { ImportsWizardPage } from './pages/imports/imports-wizard';
 
 function ProtectedLayout(): React.JSX.Element {
   const { user, loading } = useAuth();
@@ -57,6 +64,50 @@ const homeRoute = createRoute({
   path: '/',
   component: HomePage,
 });
+
+// Module 2 Routes
+const contactsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/contacts',
+  component: ContactsListPage,
+});
+
+const contactDetailRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/contacts/$id',
+  component: ContactDetailPage,
+});
+
+const accountsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/accounts',
+  component: AccountsListPage,
+});
+
+const accountDetailRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/accounts/$id',
+  component: AccountDetailPage,
+});
+
+const duplicatesRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/duplicates',
+  component: DedupQueuePage,
+});
+
+const importsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/imports',
+  component: ImportsWizardPage,
+});
+
+const customFieldsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/settings/custom-fields',
+  component: CustomFieldsAdminPage,
+});
+
 const profileRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/settings/profile',
@@ -132,6 +183,13 @@ const ssoErrorRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   protectedRoute.addChildren([
     homeRoute,
+    contactsRoute,
+    contactDetailRoute,
+    accountsRoute,
+    accountDetailRoute,
+    duplicatesRoute,
+    importsRoute,
+    customFieldsRoute,
     profileRoute,
     securityRoute,
     usersRoute,
@@ -160,3 +218,4 @@ declare module '@tanstack/react-router' {
 export function AppRouter(): React.JSX.Element {
   return <RouterProvider router={router} />;
 }
+
