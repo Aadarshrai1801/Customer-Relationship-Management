@@ -203,11 +203,8 @@ export class ContactsService {
   async getById(auth: AuthContext, id: string): Promise<SerializedContact> {
     return this.tenantDb.tx(auth.org.id, async (db) => {
       const defs = await this.fields.loadDefinitions(db, auth.org.id, 'contact');
-      const row = await this.findLive(db, auth.org.id, id);
-      if (!row) {
-        throw new NotFoundException({ message: 'Contact not found', code: 'CONTACT_NOT_FOUND' });
-      }
-      this.assertReadable(auth, row.contact.ownerId);
+      const row = await this.requireLiveContact(db, auth.org.id, id);
+      this.assertContactReadable(auth, row.contact.ownerId);
       return this.serializeJoined(auth, defs, row.contact, row.account, row.owner);
     });
   }
@@ -382,12 +379,34 @@ export class ContactsService {
     return auth.role.permissions?.recordAccess?.['contact'] ?? 'own';
   }
 
-  private assertReadable(auth: AuthContext, ownerId: string | null): void {
+  /** Shared with notes/timeline modules: throws 404 for missing/deleted/foreign contacts. */
+  async requireLiveContact(
+    db: NexusDb,
+    orgId: string,
+    id: string,
+  ): Promise<{
+    contact: Contact;
+    account: { id: string; name: string } | null;
+    owner: { id: string; name: string } | null;
+  }> {
+    const row = await this.findLive(db, orgId, id);
+    if (!row) {
+      throw new NotFoundException({ message: 'Contact not found', code: 'CONTACT_NOT_FOUND' });
+    }
+    return row;
+  }
+
+  /** Shared with notes/timeline modules. */
+  assertContactReadable(auth: AuthContext, ownerId: string | null): void {
     try {
       checkRecordAccess(auth.role.permissions, 'contact', ownerId ?? '', auth.user.id);
     } catch {
       recordForbidden();
     }
+  }
+
+  private assertReadable(auth: AuthContext, ownerId: string | null): void {
+    this.assertContactReadable(auth, ownerId);
   }
 
   private async requireAccount(db: NexusDb, orgId: string, accountId: string) {
