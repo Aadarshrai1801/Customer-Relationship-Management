@@ -13,6 +13,8 @@ Monorepo for Nexus CRM. TypeScript full-stack, API-first.
 npm install
 npm run infra:up        # postgres + mailpit
 cp .env.example .env
+# generate a dev encryption key and put it in .env as FIELD_ENCRYPTION_KEY:
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 npm run db:migrate
 npm run dev:api         # API on http://localhost:3001
 ```

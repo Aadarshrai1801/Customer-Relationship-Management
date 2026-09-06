@@ -55,7 +55,7 @@ export class AuthController {
   ): Promise<unknown> {
     const result = await this.auth.signup(body as SignupInput, requestMeta(req));
     setSessionCookie(res, result.session.token, result.session.expiresAt);
-    return { user: result.user, org: result.org };
+    return { user: result.user, org: result.org, twoFactor: result.twoFactor };
   }
 
   @Public()
@@ -68,7 +68,7 @@ export class AuthController {
   ): Promise<unknown> {
     const result = await this.auth.login(body as LoginInput, requestMeta(req));
     setSessionCookie(res, result.session.token, result.session.expiresAt);
-    return { user: result.user, org: result.org };
+    return { user: result.user, org: result.org, twoFactor: result.twoFactor };
   }
 
   @Post('logout')
@@ -138,6 +138,6 @@ export class AuthController {
   ): Promise<unknown> {
     const result = await this.auth.acceptInvite(body as AcceptInviteInput, requestMeta(req));
     setSessionCookie(res, result.session.token, result.session.expiresAt);
-    return { user: result.user, org: result.org };
+    return { user: result.user, org: result.org, twoFactor: result.twoFactor };
   }
 }

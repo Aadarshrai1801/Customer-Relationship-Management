@@ -7,6 +7,7 @@ export interface AuthUser {
   name: string;
   status: 'invited' | 'active' | 'suspended';
   roleId: string;
+  twoFactorEnrolled: boolean;
 }
 
 export interface AuthRole {
@@ -24,6 +25,7 @@ export interface AuthOrg {
 
 export interface AuthContext {
   sessionId: string;
+  twoFactorVerified: boolean;
   user: AuthUser;
   role: AuthRole;
   org: AuthOrg;

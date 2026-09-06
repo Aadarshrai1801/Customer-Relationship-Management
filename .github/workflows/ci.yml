@@ -28,6 +28,8 @@ jobs:
       AUTH_DATABASE_URL: postgres://nexus_auth:nexus_auth@localhost:5432/nexus
       MIGRATE_DATABASE_URL: postgres://postgres:postgres@localhost:5432/nexus
       SMTP_URL: smtp://localhost:1025
+      # Throwaway CI-only key. Never use a committed key outside CI.
+      FIELD_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

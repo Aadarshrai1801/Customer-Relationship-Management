@@ -9,6 +9,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { IS_PUBLIC_KEY } from '../common/public.decorator';
+import { ALLOW_UNVERIFIED_KEY } from '../rbac/allow-unverified.decorator';
 import { REQUIRED_SCOPES_KEY } from '../rbac/require-scopes.decorator';
 import { hasScope } from '../rbac/permissions';
 import { SESSION_COOKIE_NAME } from './tokens';
@@ -39,6 +40,18 @@ export class AuthGuard implements CanActivate {
     }
     if (auth.user.status === 'suspended') {
       throw new ForbiddenException({ message: 'Account suspended', code: 'ACCOUNT_SUSPENDED' });
+    }
+    if (!auth.twoFactorVerified) {
+      const allowUnverified = this.reflector.getAllAndOverride<boolean>(ALLOW_UNVERIFIED_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+      if (!allowUnverified) {
+        throw new ForbiddenException({
+          message: 'Two-factor verification required',
+          code: 'TWO_FACTOR_REQUIRED',
+        });
+      }
     }
     const required =
       this.reflector.getAllAndOverride<string[]>(REQUIRED_SCOPES_KEY, [

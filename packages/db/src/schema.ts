@@ -130,6 +130,20 @@ export const passwordResetTokens = pgTable(
   (t) => [uniqueIndex('uq_password_reset_tokens_token_hash').on(t.tokenHash)],
 );
 
+export const twoFactor = pgTable('two_factor', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  orgId: uuid('org_id')
+    .notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  secret: text('secret').notNull(),
+  enabledAt: timestamp('enabled_at', { withTimezone: true }),
+  backupCodes: text('backup_codes').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const sessions = pgTable(
   'sessions',
   {
@@ -164,5 +178,7 @@ export type EmailInvite = typeof emailInvites.$inferSelect;
 export type NewEmailInvite = typeof emailInvites.$inferInsert;
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert;
+export type TwoFactor = typeof twoFactor.$inferSelect;
+export type NewTwoFactor = typeof twoFactor.$inferInsert;
 
 export * from './env';

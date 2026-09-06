@@ -17,10 +17,13 @@ import {
   passwordResetTokens,
   roles,
   sessions,
+  twoFactor,
   users,
   type NewOrganization,
   type NewRole,
+  type Organization,
   type OrganizationSecuritySettings,
+  type User,
 } from '@nexus/db';
 import { IdentityDb, TenantDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
@@ -28,7 +31,8 @@ import { SYSTEM_ROLE_SEEDS } from '../rbac/seeds';
 import { PasswordService } from './password.service';
 import { SessionService, type CreatedSession } from './session.service';
 import { MailService } from './mail.service';
-import { LoginThrottle } from './login-throttle.service';
+import { AttemptThrottle } from './attempt-throttle.service';
+import { LOGIN_THROTTLE } from './throttle.tokens';
 import { generateToken, hashToken } from './tokens';
 import type {
   AcceptInviteInput,
@@ -44,7 +48,14 @@ export interface PublicUser {
   email: string;
   name: string;
   status: string;
+  twoFactorEnrolled?: boolean;
   role: { id: string; key: string; name: string; permissions?: unknown };
+}
+
+export interface TwoFactorState {
+  enrolled: boolean;
+  required: boolean;
+  verified: boolean;
 }
 
 export interface PublicOrg {
@@ -64,13 +75,18 @@ export class AuthService {
     @Inject(PasswordService) private readonly passwords: PasswordService,
     @Inject(SessionService) private readonly sessions: SessionService,
     @Inject(MailService) private readonly mail: MailService,
-    @Inject(LoginThrottle) private readonly throttle: LoginThrottle,
+    @Inject(LOGIN_THROTTLE) private readonly loginThrottle: AttemptThrottle,
   ) {}
 
   async signup(
     input: SignupInput,
     meta: { ipAddress?: string; userAgent?: string },
-  ): Promise<{ user: PublicUser; org: PublicOrg; session: CreatedSession }> {
+  ): Promise<{
+    user: PublicUser;
+    org: PublicOrg;
+    session: CreatedSession;
+    twoFactor: TwoFactorState;
+  }> {
     const slug = await this.allocateSlug(input.slug ?? deriveSlug(input.orgName));
     const orgRow: NewOrganization = {
       name: input.orgName,
@@ -105,27 +121,27 @@ export class AuthService {
       .returning();
     if (!user) throw new Error('Failed to create user');
 
-    const session = await this.sessions.createSession({
-      userId: user.id,
-      orgId: org.id,
-      ipAddress: meta.ipAddress,
-      userAgent: meta.userAgent,
-      ttlDaysOverride: org.securitySettings.sessionTtlDays,
-    });
+    const { session, twoFactor } = await this.issueSession(user, org, meta);
 
     return {
-      user: toPublicUser(user, ownerRole),
+      user: { ...toPublicUser(user, ownerRole), twoFactorEnrolled: twoFactor.enrolled },
       org: toPublicOrg(org),
       session,
+      twoFactor,
     };
   }
 
   async login(
     input: LoginInput,
     meta: { ipAddress?: string; userAgent?: string },
-  ): Promise<{ user: PublicUser; org: PublicOrg; session: CreatedSession }> {
+  ): Promise<{
+    user: PublicUser;
+    org: PublicOrg;
+    session: CreatedSession;
+    twoFactor: TwoFactorState;
+  }> {
     const throttleKey = `${meta.ipAddress ?? 'unknown'}:${input.email}`;
-    this.throttle.check(throttleKey);
+    this.loginThrottle.check(throttleKey);
 
     const matches = await this.identityDb.db
       .select({ user: users, org: organizations, role: roles })
@@ -135,7 +151,7 @@ export class AuthService {
       .where(sql`lower(${users.email}) = ${input.email}`);
 
     const invalid = (): never => {
-      this.throttle.recordFailure(throttleKey);
+      this.loginThrottle.recordFailure(throttleKey);
       throw new UnauthorizedException({
         message: 'Invalid email or password',
         code: 'INVALID_CREDENTIALS',
@@ -161,7 +177,7 @@ export class AuthService {
       throw new ForbiddenException({ message: 'Account suspended', code: 'ACCOUNT_SUSPENDED' });
     }
     if (!user.passwordHash) {
-      this.throttle.recordFailure(throttleKey);
+      this.loginThrottle.recordFailure(throttleKey);
       throw new UnauthorizedException({
         message: 'Password sign-in is disabled for this account',
         code: 'PASSWORD_AUTH_DISABLED',
@@ -170,15 +186,40 @@ export class AuthService {
     const ok = await this.passwords.verify(user.passwordHash, input.password);
     if (!ok) invalid();
 
-    this.throttle.recordSuccess(throttleKey);
+    this.loginThrottle.recordSuccess(throttleKey);
+    const { session, twoFactor } = await this.issueSession(user, org, meta);
+    return {
+      user: { ...toPublicUser(user, role), twoFactorEnrolled: twoFactor.enrolled },
+      org: toPublicOrg(org),
+      session,
+      twoFactor,
+    };
+  }
+
+  /**
+   * Single decision point for session issuance after password verification:
+   * resolves the org's 2FA policy + enrollment state into verified/unverified.
+   */
+  private async issueSession(
+    user: Pick<User, 'id'>,
+    org: Pick<Organization, 'id' | 'securitySettings'>,
+    meta: { ipAddress?: string; userAgent?: string },
+  ): Promise<{ session: CreatedSession; twoFactor: TwoFactorState }> {
+    const policy = org.securitySettings.twoFactorPolicy ?? 'optional';
+    const [tfa] = await this.tenantDb.tx(org.id, (db) =>
+      db.select().from(twoFactor).where(eq(twoFactor.userId, user.id)),
+    );
+    const enrolled = !!tfa?.enabledAt;
+    const required = policy === 'required' || (enrolled && policy !== 'off');
     const session = await this.sessions.createSession({
       userId: user.id,
       orgId: org.id,
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
+      twoFactorVerified: !required,
       ttlDaysOverride: org.securitySettings.sessionTtlDays,
     });
-    return { user: toPublicUser(user, role), org: toPublicOrg(org), session };
+    return { session, twoFactor: { enrolled, required, verified: !required } };
   }
 
   async logout(auth: AuthContext): Promise<void> {
@@ -192,6 +233,7 @@ export class AuthService {
         email: auth.user.email,
         name: auth.user.name,
         status: auth.user.status,
+        twoFactorEnrolled: auth.user.twoFactorEnrolled,
         role: {
           id: auth.role.id,
           key: auth.role.key,
@@ -366,7 +408,12 @@ export class AuthService {
   async acceptInvite(
     input: AcceptInviteInput,
     meta: { ipAddress?: string; userAgent?: string },
-  ): Promise<{ user: PublicUser; org: PublicOrg; session: CreatedSession }> {
+  ): Promise<{
+    user: PublicUser;
+    org: PublicOrg;
+    session: CreatedSession;
+    twoFactor: TwoFactorState;
+  }> {
     const invite = await this.loadInvite(input.token);
 
     const created = await this.tenantDb.tx(invite.org.id, async (db) => {
@@ -399,14 +446,13 @@ export class AuthService {
       return user;
     });
 
-    const session = await this.sessions.createSession({
-      userId: created.id,
-      orgId: invite.org.id,
-      ipAddress: meta.ipAddress,
-      userAgent: meta.userAgent,
-      ttlDaysOverride: invite.org.securitySettings.sessionTtlDays,
-    });
-    return { user: toPublicUser(created, invite.role), org: toPublicOrg(invite.org), session };
+    const { session, twoFactor } = await this.issueSession(created, invite.org, meta);
+    return {
+      user: { ...toPublicUser(created, invite.role), twoFactorEnrolled: twoFactor.enrolled },
+      org: toPublicOrg(invite.org),
+      session,
+      twoFactor,
+    };
   }
 
   private async allocateSlug(preferred: string): Promise<string> {

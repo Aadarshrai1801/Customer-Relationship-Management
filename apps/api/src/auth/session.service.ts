@@ -5,6 +5,7 @@ import {
   organizations,
   roles,
   sessions,
+  twoFactor,
   users,
   type OrganizationSecuritySettings,
 } from '@nexus/db';
@@ -78,8 +79,11 @@ export class SessionService {
       const [org] = await db.select().from(organizations).where(eq(organizations.id, user.orgId));
       const [role] = await db.select().from(roles).where(eq(roles.id, user.roleId));
       if (!org || !role) return null;
+      const [tfa] = await db.select().from(twoFactor).where(eq(twoFactor.userId, user.id));
       return {
         sessionId: session.id,
+        twoFactorVerified: session.twoFactorVerified,
+        twoFactorEnrolled: !!tfa?.enabledAt,
         user: {
           id: user.id,
           orgId: user.orgId,
@@ -102,7 +106,8 @@ export class SessionService {
     await this.maybeExtend(session, context.sessionMeta);
     return {
       sessionId: context.sessionId,
-      user: context.user,
+      twoFactorVerified: context.twoFactorVerified,
+      user: { ...context.user, twoFactorEnrolled: context.twoFactorEnrolled },
       role: {
         id: context.role.id,
         key: context.role.key,

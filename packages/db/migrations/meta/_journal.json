@@ -15,6 +15,13 @@
       "when": 1788688398210,
       "tag": "0001_nifty_kronos",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788689715784,
+      "tag": "0002_lush_scarlet_spider",
+      "breakpoints": true
     }
   ]
 }
