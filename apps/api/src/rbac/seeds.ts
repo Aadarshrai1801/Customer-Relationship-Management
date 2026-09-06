@@ -33,6 +33,8 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
           'org:read',
           'org:manage',
           'audit:read',
+          'custom_fields:read',
+          'custom_fields:manage',
         ],
         { user: 'all' },
       ),
@@ -40,16 +42,16 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
     {
       key: 'manager',
       name: 'Manager',
-      permissions: perms(['users:read', 'org:read'], { user: 'all' }),
+      permissions: perms(['users:read', 'org:read', 'custom_fields:read'], { user: 'all' }),
     },
     {
       key: 'rep',
       name: 'Sales Rep',
-      permissions: perms(['users:read'], { user: 'own' }),
+      permissions: perms(['users:read', 'custom_fields:read'], { user: 'own' }),
     },
     {
       key: 'viewer',
       name: 'Viewer',
-      permissions: perms([], { user: 'own' }),
+      permissions: perms(['custom_fields:read'], { user: 'own' }),
     },
   ];

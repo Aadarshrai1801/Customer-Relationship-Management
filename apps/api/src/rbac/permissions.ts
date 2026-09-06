@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { RolePermissions } from '@nexus/db';
 
-const scopePattern = /^(\*|[a-z]+:[a-z*]+)$/;
+const scopePattern = /^(\*|[a-z_]+:[a-z_*]+)$/;
 const fieldKeyPattern = /^[a-z]+\.[A-Za-z0-9_]+$/;
 
 export const rolePermissionsSchema = z.object({

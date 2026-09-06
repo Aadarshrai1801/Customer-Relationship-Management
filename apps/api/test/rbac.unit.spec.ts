@@ -106,6 +106,9 @@ describe('parsePermissions', () => {
   it('rejects malformed scopes, field keys, and versions', () => {
     expect(() => parsePermissions({ version: 1, scopes: ['bogus scope'] })).toThrow();
     expect(() => parsePermissions({ version: 1, scopes: [], fields: { nope: 'none' } })).toThrow();
+    expect(() =>
+      parsePermissions({ version: 1, scopes: ['custom_fields:read', 'custom_fields:manage'] }),
+    ).not.toThrow();
     expect(() => parsePermissions({ version: 2, scopes: [] })).toThrow();
     expect(() =>
       parsePermissions({ version: 1, scopes: [], recordAccess: { user: 'everyone' } }),
@@ -122,12 +125,14 @@ describe('system role seeds', () => {
     }
   });
 
-  it('grants owners everything and viewers nothing', () => {
+  it('grants owners everything, viewers read-only schema, reps own records', () => {
     const owner = SYSTEM_ROLE_SEEDS.find((r) => r.key === 'owner')!;
     const viewer = SYSTEM_ROLE_SEEDS.find((r) => r.key === 'viewer')!;
     const rep = SYSTEM_ROLE_SEEDS.find((r) => r.key === 'rep')!;
     expect(hasScope(owner.permissions, 'users:manage')).toBe(true);
     expect(hasScope(viewer.permissions, 'users:read')).toBe(false);
+    expect(hasScope(viewer.permissions, 'custom_fields:read')).toBe(true);
+    expect(hasScope(rep.permissions, 'custom_fields:read')).toBe(true);
     expect(rep.permissions.recordAccess['user']).toBe('own');
   });
 });

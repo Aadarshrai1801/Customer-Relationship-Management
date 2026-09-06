@@ -416,9 +416,7 @@ export const duplicateCandidates = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
   },
-  (t) => [
-    uniqueIndex('uq_dup_candidate_pair').on(t.orgId, t.entityType, t.recordAId, t.recordBId),
-  ],
+  (t) => [uniqueIndex('uq_dup_candidate_pair').on(t.orgId, t.entityType, t.recordAId, t.recordBId)],
 );
 
 export const contactMerges = pgTable('contact_merges', {
