@@ -272,12 +272,7 @@ export class CustomFieldsService {
           code: 'FORMULA_CHAINED',
         });
       }
-      if (target.type === 'date') {
-        throw new BadRequestException({
-          message: `Date field {${ref}} is not usable in formulas yet`,
-          code: 'FORMULA_TYPE_UNSUPPORTED',
-        });
-      }
+      // Date refs behave as ISO strings (lexicographic = chronological).
     }
   }
 

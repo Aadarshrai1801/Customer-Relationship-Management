@@ -1,4 +1,45 @@
 import type { CustomFieldType } from '@nexus/db';
+import { evaluateFormula, parseFormula } from './formula';
+
+/**
+ * Evaluates all formula definitions against stored custom values. Evaluation
+ * failures yield null plus an entry in errors — reads never throw.
+ */
+export function computeFormulas(
+  defs: FieldDefinition[],
+  values: Record<string, unknown>,
+): { computed: Record<string, unknown>; errors: Record<string, string> } {
+  const computed: Record<string, unknown> = {};
+  const errors: Record<string, string> = {};
+  for (const def of defs) {
+    if (def.type !== 'formula') continue;
+    const expression = def.options['expression'];
+    if (typeof expression !== 'string' || !expression.trim()) {
+      errors[def.key] = 'Missing expression';
+      computed[def.key] = null;
+      continue;
+    }
+    const parsed = parseFormula(expression);
+    if (!parsed.ok) {
+      errors[def.key] = parsed.error;
+      computed[def.key] = null;
+      continue;
+    }
+    const result = evaluateFormula(parsed.ast, (key) => {
+      if (!(key in values)) return { found: false };
+      const resolved = resolveFormulaValue(values[key]);
+      if (!resolved.usable) throw new Error(`Field {${key}} is not usable in formulas`);
+      return { found: true, value: resolved.value };
+    });
+    if (result.ok) {
+      computed[def.key] = result.value;
+    } else {
+      computed[def.key] = null;
+      errors[def.key] = result.error;
+    }
+  }
+  return { computed, errors };
+}
 
 export interface FieldDefinition {
   key: string;
@@ -40,6 +81,24 @@ function picklistOptions(def: FieldDefinition): string[] | null {
   const raw = def.options['options'];
   if (!Array.isArray(raw)) return null;
   return raw.filter((o): o is string => typeof o === 'string');
+}
+
+/**
+ * Maps a stored custom value to a formula-usable primitive. Currency objects
+ * contribute their amount; multi-selects and unknown shapes are unusable.
+ */
+export function resolveFormulaValue(
+  value: unknown,
+): { usable: true; value: number | string | boolean } | { usable: false } {
+  if (typeof value === 'number' && Number.isFinite(value)) return { usable: true, value };
+  if (typeof value === 'string') return { usable: true, value };
+  if (typeof value === 'boolean') return { usable: true, value };
+  if (typeof value === 'object' && value !== null && 'amount' in value) {
+    const amount = (value as { amount: unknown }).amount;
+    if (typeof amount === 'number' && Number.isFinite(amount))
+      return { usable: true, value: amount };
+  }
+  return { usable: false };
 }
 
 function defaultCurrency(def: FieldDefinition): string {
