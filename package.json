@@ -1,0 +1,32 @@
+{
+  "name": "nexus-crm",
+  "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @nexus/db && npm run build -w @nexus/api",
+    "typecheck": "npm run typecheck -w @nexus/db && npm run typecheck -w @nexus/api",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,tsx,js,mjs,json,md,css}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,json,md,css}\"",
+    "test": "npm run test -w @nexus/api",
+    "db:generate": "npm run generate -w @nexus/db",
+    "db:migrate": "npm run migrate -w @nexus/db",
+    "dev:api": "npm run dev -w @nexus/api",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.30.0",
+    "eslint": "^9.30.0",
+    "eslint-config-prettier": "^10.1.0",
+    "prettier": "^3.5.0",
+    "typescript-eslint": "^8.34.0"
+  }
+}

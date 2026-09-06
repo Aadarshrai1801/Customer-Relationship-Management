@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nexus
+        ports:
+          - 5432:5432
+        volumes:
+          - ${{ github.workspace }}/postgres/init:/docker-entrypoint-initdb.d:ro
+        options: >-
+          --health-cmd "pg_isready -U postgres -d nexus"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      DATABASE_URL: postgres://nexus_app:nexus_app@localhost:5432/nexus
+      AUTH_DATABASE_URL: postgres://nexus_auth:nexus_auth@localhost:5432/nexus
+      MIGRATE_DATABASE_URL: postgres://postgres:postgres@localhost:5432/nexus
+      SMTP_URL: smtp://localhost:1025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @nexus/db
+      - run: npm run db:migrate
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
