@@ -11,6 +11,7 @@ import { OrgModule } from './org/org.module';
 import { PrivacyModule } from './privacy/privacy.module';
 import { CustomFieldsModule } from './custom-fields/custom-fields.module';
 import { ContactsModule } from './contacts/contacts.module';
+import { AccountsModule } from './accounts/accounts.module';
 import { HealthController } from './health/health.controller';
 
 @Module({
@@ -27,6 +28,7 @@ import { HealthController } from './health/health.controller';
     PrivacyModule,
     CustomFieldsModule,
     ContactsModule,
+    AccountsModule,
   ],
   controllers: [HealthController],
 })

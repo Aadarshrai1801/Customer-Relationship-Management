@@ -37,32 +37,50 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
           'custom_fields:manage',
           'contacts:read',
           'contacts:manage',
+          'accounts:read',
+          'accounts:manage',
         ],
-        { user: 'all', contact: 'all' },
+        { user: 'all', contact: 'all', account: 'all' },
       ),
     },
     {
       key: 'manager',
       name: 'Manager',
-      permissions: perms(['users:read', 'org:read', 'custom_fields:read', 'contacts:read'], {
-        user: 'all',
-        contact: 'all',
-      }),
+      permissions: perms(
+        ['users:read', 'org:read', 'custom_fields:read', 'contacts:read', 'accounts:read'],
+        {
+          user: 'all',
+          contact: 'all',
+          account: 'all',
+        },
+      ),
     },
     {
       key: 'rep',
       name: 'Sales Rep',
-      permissions: perms(['users:read', 'custom_fields:read', 'contacts:read', 'contacts:manage'], {
-        user: 'own',
-        contact: 'own',
-      }),
+      permissions: perms(
+        [
+          'users:read',
+          'custom_fields:read',
+          'contacts:read',
+          'contacts:manage',
+          'accounts:read',
+          'accounts:manage',
+        ],
+        {
+          user: 'own',
+          contact: 'own',
+          account: 'own',
+        },
+      ),
     },
     {
       key: 'viewer',
       name: 'Viewer',
-      permissions: perms(['custom_fields:read', 'contacts:read'], {
+      permissions: perms(['custom_fields:read', 'contacts:read', 'accounts:read'], {
         user: 'own',
         contact: 'own',
+        account: 'own',
       }),
     },
   ];

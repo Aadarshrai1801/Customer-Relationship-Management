@@ -324,13 +324,17 @@ export const accounts = pgTable(
     parentId: uuid('parent_id').references((): AnyPgColumn => accounts.id, {
       onDelete: 'set null',
     }),
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
     tags: text('tags').array().notNull().default([]),
     customFields: jsonb('custom_fields').$type<Record<string, unknown>>().notNull().default({}),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('ix_accounts_org_parent').on(t.orgId, t.parentId)],
+  (t) => [
+    index('ix_accounts_org_parent').on(t.orgId, t.parentId),
+    index('ix_accounts_org_owner').on(t.orgId, t.ownerId),
+  ],
 );
 
 export const contacts = pgTable(
