@@ -85,6 +85,8 @@ export const users = pgTable(
     roleId: uuid('role_id')
       .notNull()
       .references(() => roles.id, { onDelete: 'restrict' }),
+    ssoSubject: text('sso_subject'),
+    ssoProvider: text('sso_provider'),
     timezone: text('timezone').notNull().default('UTC'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -144,6 +146,43 @@ export const twoFactor = pgTable('two_factor', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const ssoConfigs = pgTable(
+  'sso_configs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    provider: text('provider').$type<'saml' | 'oidc'>().notNull(),
+    enabled: boolean('enabled').notNull().default(false),
+    domains: text('domains').array().notNull().default([]),
+    config: text('config').notNull(),
+    defaultRoleKey: text('default_role_key').notNull().default('rep'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uq_sso_configs_org_provider').on(t.orgId, t.provider)],
+);
+
+export const ssoLoginStates = pgTable(
+  'sso_login_states',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    provider: text('provider').$type<'saml' | 'oidc'>().notNull(),
+    stateHash: text('state_hash').notNull(),
+    codeVerifier: text('code_verifier'),
+    nonce: text('nonce'),
+    samlRequestId: text('saml_request_id'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uq_sso_login_states_state_hash').on(t.stateHash)],
+);
+
 export const sessions = pgTable(
   'sessions',
   {
@@ -180,5 +219,8 @@ export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert;
 export type TwoFactor = typeof twoFactor.$inferSelect;
 export type NewTwoFactor = typeof twoFactor.$inferInsert;
+export type SsoConfig = typeof ssoConfigs.$inferSelect;
+export type NewSsoConfig = typeof ssoConfigs.$inferInsert;
+export type SsoLoginState = typeof ssoLoginStates.$inferSelect;
 
 export * from './env';

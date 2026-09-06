@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { SessionModule } from './session.module';
+import { SsoModule } from '../sso/sso.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { AuthGuard } from './auth.guard';
@@ -7,17 +9,16 @@ import { AttemptThrottle } from './attempt-throttle.service';
 import { LOGIN_THROTTLE, TFA_THROTTLE } from './throttle.tokens';
 import { MailService } from './mail.service';
 import { PasswordService } from './password.service';
-import { SessionService } from './session.service';
 import { TwoFactorController } from './two-factor.controller';
 import { TwoFactorService } from './two-factor.service';
 
 const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 
 @Module({
+  imports: [SessionModule, SsoModule],
   controllers: [AuthController, TwoFactorController],
   providers: [
     AuthService,
-    SessionService,
     PasswordService,
     MailService,
     TwoFactorService,

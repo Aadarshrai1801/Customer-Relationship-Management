@@ -33,7 +33,10 @@ import { SessionService, type CreatedSession } from './session.service';
 import { MailService } from './mail.service';
 import { AttemptThrottle } from './attempt-throttle.service';
 import { LOGIN_THROTTLE } from './throttle.tokens';
+import { SsoService } from '../sso/sso.service';
 import { generateToken, hashToken } from './tokens';
+import type { PublicOrg, PublicUser, TwoFactorState } from './auth-shapes';
+import { toPublicOrg, toPublicUser } from './auth-shapes';
 import type {
   AcceptInviteInput,
   ConfirmResetInput,
@@ -43,26 +46,7 @@ import type {
   SignupInput,
 } from './auth.schemas';
 
-export interface PublicUser {
-  id: string;
-  email: string;
-  name: string;
-  status: string;
-  twoFactorEnrolled?: boolean;
-  role: { id: string; key: string; name: string; permissions?: unknown };
-}
-
-export interface TwoFactorState {
-  enrolled: boolean;
-  required: boolean;
-  verified: boolean;
-}
-
-export interface PublicOrg {
-  id: string;
-  name: string;
-  slug: string;
-}
+export type { PublicOrg, PublicUser, TwoFactorState };
 
 const RESET_TTL_MS = 60 * 60 * 1000;
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -76,6 +60,7 @@ export class AuthService {
     @Inject(SessionService) private readonly sessions: SessionService,
     @Inject(MailService) private readonly mail: MailService,
     @Inject(LOGIN_THROTTLE) private readonly loginThrottle: AttemptThrottle,
+    @Inject(SsoService) private readonly sso: SsoService,
   ) {}
 
   async signup(
@@ -175,6 +160,12 @@ export class AuthService {
 
     if (user.status === 'suspended') {
       throw new ForbiddenException({ message: 'Account suspended', code: 'ACCOUNT_SUSPENDED' });
+    }
+    if (await this.sso.isSsoOnly(org.id)) {
+      throw new ForbiddenException({
+        message: 'Single sign-on is required for this workspace',
+        code: 'SSO_REQUIRED',
+      });
     }
     if (!user.passwordHash) {
       this.loginThrottle.recordFailure(throttleKey);
@@ -516,21 +507,4 @@ function deriveSlug(name: string): string {
 
 function minPasswordLength(settings: OrganizationSecuritySettings | null | undefined): number {
   return settings?.passwordMinLength ?? DEFAULT_ORGANIZATION_SECURITY_SETTINGS.passwordMinLength;
-}
-
-function toPublicUser(
-  user: { id: string; email: string; name: string; status: string },
-  role: { id: string; key: string; name: string },
-): PublicUser {
-  return {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    status: user.status,
-    role: { id: role.id, key: role.key, name: role.name },
-  };
-}
-
-function toPublicOrg(org: { id: string; name: string; slug: string }): PublicOrg {
-  return { id: org.id, name: org.name, slug: org.slug };
 }

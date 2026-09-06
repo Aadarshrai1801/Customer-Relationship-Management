@@ -30,17 +30,14 @@ import {
   type RequestResetInput,
   type SignupInput,
 } from './auth.schemas';
-import { SESSION_COOKIE_NAME, clearedCookieOptions, cookieOptions } from './tokens';
+import { SESSION_COOKIE_NAME, clearedCookieOptions, setSessionCookie } from './tokens';
 
 function requestMeta(req: Request): { ipAddress?: string; userAgent?: string } {
   const userAgent = req.headers['user-agent'];
   return { ipAddress: req.ip, userAgent: Array.isArray(userAgent) ? userAgent[0] : userAgent };
 }
 
-function setSessionCookie(res: Response, token: string, expiresAt: Date): void {
-  const maxAgeSeconds = Math.max(60, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
-  res.cookie(SESSION_COOKIE_NAME, token, cookieOptions(maxAgeSeconds));
-}
+export { requestMeta };
 
 @Controller('auth')
 export class AuthController {

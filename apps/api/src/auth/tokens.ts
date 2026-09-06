@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import type { Response } from 'express';
 
 export const SESSION_COOKIE_NAME = 'nx_session';
 
@@ -40,4 +41,9 @@ export function clearedCookieOptions(): {
     path: '/',
     maxAge: 0,
   };
+}
+
+export function setSessionCookie(res: Response, token: string, expiresAt: Date): void {
+  const maxAgeSeconds = Math.max(60, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
+  res.cookie(SESSION_COOKIE_NAME, token, cookieOptions(maxAgeSeconds));
 }
