@@ -3,7 +3,12 @@ import { Pool } from 'pg';
 import { APP_POOL, AUTH_POOL, IdentityDb, TenantDb } from './tenant-db.service';
 
 function createPool(url: string | undefined, fallback: string): Pool {
-  return new Pool({ connectionString: url || fallback, max: 10 });
+  // DB_POOL_MAX keeps parallel test workers under Postgres max_connections.
+  const max = Number(process.env.DB_POOL_MAX ?? 10);
+  return new Pool({
+    connectionString: url || fallback,
+    max: Number.isFinite(max) && max > 0 ? Math.floor(max) : 10,
+  });
 }
 
 @Global()

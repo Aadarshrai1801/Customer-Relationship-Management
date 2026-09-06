@@ -53,4 +53,20 @@ export class MailService {
       html: `<p>Your personal data export for <strong>${orgName}</strong> is ready.</p><p><a href="${link}">Download export</a> (expires in 7 days).</p>`,
     });
   }
+
+  async sendImportComplete(
+    to: string,
+    orgName: string,
+    entityType: string,
+    stats: { created: number; skipped: number; failed: number; total: number },
+  ): Promise<void> {
+    await this.transporter.sendMail({
+      from: this.from,
+      to,
+      subject: `Your ${orgName} ${entityType} import finished`,
+      text:
+        `Your import of ${stats.total} ${entityType} rows finished: ` +
+        `${stats.created} created, ${stats.skipped} skipped, ${stats.failed} failed.`,
+    });
+  }
 }

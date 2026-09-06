@@ -14,6 +14,7 @@ import { ContactsModule } from './contacts/contacts.module';
 import { AccountsModule } from './accounts/accounts.module';
 import { NotesModule } from './notes/notes.module';
 import { TimelineModule } from './timeline/timeline.module';
+import { ImportsModule } from './imports/imports.module';
 import { HealthController } from './health/health.controller';
 
 @Module({
@@ -33,6 +34,7 @@ import { HealthController } from './health/health.controller';
     AccountsModule,
     NotesModule,
     TimelineModule,
+    ImportsModule,
   ],
   controllers: [HealthController],
 })
