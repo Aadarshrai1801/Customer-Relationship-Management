@@ -16,6 +16,7 @@ import { AcceptInvitePage } from './pages/accept-invite';
 import { SsoErrorPage, SsoSuccessPage } from './pages/sso';
 import { HomePage } from './pages/home';
 import { WelcomePage } from './pages/welcome';
+import { BillingPage } from './pages/settings/billing';
 import { ProfilePage } from './pages/settings/profile';
 import { SecurityPage } from './pages/settings/security';
 import { UsersPage } from './pages/settings/users';
@@ -79,6 +80,12 @@ const welcomeRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/welcome',
   component: WelcomePage,
+});
+
+const billingRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/settings/billing',
+  component: BillingPage,
 });
 
 // Module 4 Routes
@@ -258,6 +265,7 @@ const routeTree = rootRoute.addChildren([
   protectedRoute.addChildren([
     homeRoute,
     welcomeRoute,
+    billingRoute,
     dealsRoute,
     dealDetailRoute,
     tasksRoute,
