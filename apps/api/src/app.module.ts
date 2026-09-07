@@ -21,6 +21,7 @@ import { DealsModule } from './deals/deals.module';
 import { ProductsModule } from './products/products.module';
 import { TasksModule } from './tasks/tasks.module';
 import { EmailsModule } from './emails/emails.module';
+import { ReportsModule } from './reports/reports.module';
 import { LeadRoutingModule } from './lead-routing/lead-routing.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { WebToLeadModule } from './web-to-lead/web-to-lead.module';
@@ -50,6 +51,7 @@ import { HealthController } from './health/health.controller';
     ProductsModule,
     TasksModule,
     EmailsModule,
+    ReportsModule,
     LeadRoutingModule,
     NotificationsModule,
     WebToLeadModule,
