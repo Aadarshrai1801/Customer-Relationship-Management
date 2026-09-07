@@ -68,6 +68,8 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
           'comments:manage',
           'attachments:read',
           'attachments:manage',
+          'workflows:read',
+          'workflows:manage',
           'notifications:read',
         ],
         {
@@ -105,6 +107,7 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
           'comments:manage',
           'attachments:read',
           'attachments:manage',
+          'workflows:read',
         ],
         {
           user: 'all',

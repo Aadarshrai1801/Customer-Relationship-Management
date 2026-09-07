@@ -307,6 +307,64 @@ export type Subscription = typeof subscriptions.$inferSelect;
 export type NewSubscription = typeof subscriptions.$inferInsert;
 export type Invoice = typeof invoices.$inferSelect;
 export type NewInvoice = typeof invoices.$inferInsert;
+export type Workflow = typeof workflows.$inferSelect;
+export type NewWorkflow = typeof workflows.$inferInsert;
+export type WorkflowRun = typeof workflowRuns.$inferSelect;
+
+/**
+ * Module 11 (PRD 4.9): automation rules (trigger → conditions → actions).
+ * trigger is { kind, entity?, config? }; conditions is an array of
+ * { field, operator, value }; actions is an array of { type, params }.
+ * Shapes are validated in the API (zod), not by DB constraints, so new
+ * triggers/actions never need a migration. maxRuns caps self-triggering
+ * cascades (loop protection, default 5).
+ */
+export const workflows = pgTable(
+  'workflows',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    trigger: jsonb('trigger').$type<Record<string, unknown>>().notNull(),
+    conditions: jsonb('conditions').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    actions: jsonb('actions').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    maxRuns: integer('max_runs').notNull().default(5),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_workflows_org_active').on(t.orgId, t.isActive)],
+);
+
+/**
+ * Module 11: per-run execution log for debugging (PRD 4.9 acceptance).
+ * Immutable; status is success | failed | skipped.
+ */
+export const workflowRuns = pgTable(
+  'workflow_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    workflowId: uuid('workflow_id')
+      .notNull()
+      .references(() => workflows.id, { onDelete: 'cascade' }),
+    triggerEvent: jsonb('trigger_event').$type<Record<string, unknown>>().notNull(),
+    status: text('status').notNull(),
+    actionResults: jsonb('action_results')
+      .$type<Array<Record<string, unknown>>>()
+      .notNull()
+      .default([]),
+    error: text('error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_workflow_runs_workflow').on(t.orgId, t.workflowId, t.createdAt)],
+);
 
 /**
  * Module 10 (PRD 4.15 P0): self-serve billing. One subscription row per

@@ -183,5 +183,11 @@ describe('system role seeds', () => {
     expect(hasScope(manager.permissions, 'attachments:manage')).toBe(true);
     expect(hasScope(rep.permissions, 'attachments:manage')).toBe(true);
     expect(hasScope(viewer.permissions, 'attachments:manage')).toBe(false);
+    expect(hasScope(admin.permissions, 'workflows:manage')).toBe(true);
+    expect(hasScope(admin.permissions, 'workflows:read')).toBe(true);
+    expect(hasScope(manager.permissions, 'workflows:read')).toBe(true);
+    expect(hasScope(manager.permissions, 'workflows:manage')).toBe(false);
+    expect(hasScope(rep.permissions, 'workflows:read')).toBe(false);
+    expect(hasScope(viewer.permissions, 'workflows:read')).toBe(false);
   });
 });
