@@ -85,6 +85,13 @@
       "when": 1788760736029,
       "tag": "0011_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788762611798,
+      "tag": "0012_emails",
+      "breakpoints": true
     }
   ]
 }

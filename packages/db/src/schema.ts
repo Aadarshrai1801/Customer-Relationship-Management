@@ -290,6 +290,34 @@ export type Task = typeof tasks.$inferSelect;
 export type NewTask = typeof tasks.$inferInsert;
 export type Activity = typeof activities.$inferSelect;
 export type NewActivity = typeof activities.$inferInsert;
+export type EmailTemplate = typeof emailTemplates.$inferSelect;
+export type NewEmailTemplate = typeof emailTemplates.$inferInsert;
+
+/**
+ * Module 6 (PRD 4.5 P0): reusable email templates with {{variable}}
+ * rendering. Variables are substituted at send time; unknown keys render
+ * empty rather than failing the send.
+ */
+export const emailTemplates = pgTable(
+  'email_templates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    subject: text('subject').notNull(),
+    body: text('body').notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ix_email_templates_org_name').on(t.orgId, t.name),
+    uniqueIndex('uq_email_templates_org_name').on(t.orgId, t.name),
+  ],
+);
 export type GdprExport = typeof gdprExports.$inferSelect;
 export type NewGdprExport = typeof gdprExports.$inferInsert;
 export type Account = typeof accounts.$inferSelect;
@@ -903,6 +931,10 @@ export const activities = pgTable(
     externalUpdatedAt: timestamp('external_updated_at', { withTimezone: true }),
     syncStatus: text('sync_status').notNull().default('active'),
     conflictFlag: boolean('conflict_flag').notNull().default(false),
+    // Module 6 (PRD 4.5): email addressing. direction is inbound | outbound.
+    direction: text('direction').notNull().default('inbound'),
+    senderEmail: text('sender_email'),
+    recipientEmails: text('recipient_emails').array().notNull().default([]),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
