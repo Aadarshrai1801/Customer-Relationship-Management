@@ -8,11 +8,13 @@ const KNOWN_TYPES = [
   { type: 'mention', label: 'Mentions', hint: '@mentions in comments' },
   { type: 'task_digest', label: 'Task digests', hint: 'Daily overdue/reminder batch' },
   { type: 'lead_assigned', label: 'Lead assignments', hint: 'Routing notifications' },
+  { type: 'approval_requested', label: 'Approval requests', hint: 'Review queue pings' },
 ] as const;
 
 const CHANNELS = [
   { key: 'inapp', label: 'In-app' },
   { key: 'email', label: 'Email' },
+  { key: 'push', label: 'Push' },
 ] as const;
 
 export function NotificationPreferencesPage(): React.JSX.Element {

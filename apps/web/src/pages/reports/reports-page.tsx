@@ -113,7 +113,7 @@ const WIDGET_TYPES = [
   { type: 'stalled-deals', label: 'Stalled deals' },
 ] as const;
 
-type ReportTab = 'forecast' | 'pipeline' | 'activity' | 'conversion' | 'dashboards';
+type ReportTab = 'forecast' | 'pipeline' | 'activity' | 'conversion' | 'cohorts' | 'dashboards';
 
 function money(amount: number, currency: string): string {
   return `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -190,6 +190,7 @@ export function ReportsPage(): React.JSX.Element {
     { key: 'pipeline', label: 'Pipeline' },
     { key: 'activity', label: 'Activity' },
     { key: 'conversion', label: 'Conversion' },
+    { key: 'cohorts', label: 'Cohorts' },
     { key: 'dashboards', label: 'Dashboards' },
   ];
 
@@ -218,6 +219,7 @@ export function ReportsPage(): React.JSX.Element {
       {tab === 'pipeline' && <PipelinePanel />}
       {tab === 'activity' && <ActivityPanel />}
       {tab === 'conversion' && <ConversionPanel />}
+      {tab === 'cohorts' && <CohortsPanel />}
       {tab === 'dashboards' && <DashboardsPanel canManage={canManageDashboards} />}
     </div>
   );
@@ -530,6 +532,95 @@ function ConversionPanel(): React.JSX.Element {
             maximumFractionDigits: 2,
           })}
         </p>
+      </Card>
+    </div>
+  );
+}
+
+interface CohortEntry {
+  cohort: string;
+  size: number;
+  byLifecycle: Record<string, number>;
+}
+
+interface TrendEntry {
+  week: string;
+  created: number;
+  won: number;
+  wonBaseAmount: number;
+}
+
+interface CohortsData {
+  cohorts: CohortEntry[];
+  weeklyTrend: TrendEntry[];
+}
+
+function CohortsPanel(): React.JSX.Element {
+  const cohortsQuery = useQuery({
+    queryKey: ['report-cohorts'],
+    queryFn: () => api<ReportEnvelope<CohortsData>>('/reports/cohorts'),
+  });
+
+  if (cohortsQuery.isLoading) return <Skeleton className="h-64 w-full" />;
+  if (cohortsQuery.isError || !cohortsQuery.data) {
+    return (
+      <div className="rounded bg-danger-soft p-4 text-sm text-danger">
+        Could not load cohorts report: {cohortsQuery.error?.message}
+      </div>
+    );
+  }
+  const { data, meta } = cohortsQuery.data;
+  const weekMax = Math.max(1, ...data.weeklyTrend.map((w) => w.created));
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-2">
+        <CacheNote meta={meta} onRefresh={() => void cohortsQuery.refetch()} />
+      </div>
+      <Card
+        title="Contact cohorts by creation month"
+        description="Lifecycle progression per cohort."
+      >
+        {data.cohorts.length === 0 ? (
+          <p className="text-xs italic text-text-secondary">No contacts yet.</p>
+        ) : (
+          <ul className="flex flex-col gap-2 text-xs">
+            {data.cohorts.map((c) => (
+              <li
+                key={c.cohort}
+                className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-4 py-3"
+              >
+                <span className="text-sm font-medium text-text-primary">{c.cohort}</span>
+                <Badge tone="info">{c.size} contacts</Badge>
+                {Object.entries(c.byLifecycle).map(([stage, count]) => (
+                  <span key={stage} className="text-text-secondary">
+                    {stage}: {count}
+                  </span>
+                ))}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+      <Card title="Weekly deal flow" description="Created vs won deals per week.">
+        {data.weeklyTrend.length === 0 ? (
+          <p className="text-xs italic text-text-secondary">No deals yet.</p>
+        ) : (
+          <ul className="flex flex-col gap-2 text-xs">
+            {data.weeklyTrend.map((w) => (
+              <li key={w.week} className="flex items-center gap-2">
+                <span className="w-24 shrink-0 font-medium">{w.week}</span>
+                <span
+                  className="h-3 rounded bg-accent"
+                  style={{ width: `${Math.max(4, Math.round((w.created / weekMax) * 160))}px` }}
+                />
+                <span className="text-text-secondary">
+                  {w.created} created · {w.won} won
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </Card>
     </div>
   );

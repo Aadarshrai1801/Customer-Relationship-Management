@@ -6,7 +6,6 @@ import { useAuth } from '../../lib/providers';
 import type {
   ContactNote,
   CustomFieldDef,
-  LifecycleStage,
   SerializedAccount,
   SerializedContact,
   TimelineItem,
@@ -181,6 +180,28 @@ export function ContactDetailPage(): React.JSX.Element {
     },
   });
 
+  // Data enrichment mutation (links account from email domain + tags)
+  const enrichMutation = useMutation({
+    mutationFn: async () => {
+      return api<{ contact: SerializedContact; applied: Record<string, string> }>(
+        `/contacts/${id}/enrich`,
+        { method: 'POST', body: {} },
+      );
+    },
+    onSuccess: (result) => {
+      queryClient.setQueryData(['contact', id], result.contact);
+      const keys = Object.keys(result.applied);
+      notify(
+        'success',
+        keys.length > 0 ? `Enriched: ${keys.join(', ')}` : 'Already enriched — nothing to apply',
+      );
+      void queryClient.invalidateQueries({ queryKey: ['contact-timeline', id] });
+    },
+    onError: (err) => {
+      notify('error', err instanceof Error ? err.message : 'Enrichment failed');
+    },
+  });
+
   if (contactQuery.isLoading) {
     return (
       <div className="flex flex-col gap-4">
@@ -279,6 +300,13 @@ export function ContactDetailPage(): React.JSX.Element {
           </a>
           {canManage && (
             <>
+              <Button
+                variant="secondary"
+                onClick={() => enrichMutation.mutate()}
+                className="text-xs"
+              >
+                Enrich
+              </Button>
               <Button
                 variant="secondary"
                 onClick={() => setCandidateSelectOpen(true)}
@@ -392,7 +420,7 @@ export function ContactDetailPage(): React.JSX.Element {
                   placeholder="No tags (click to add, comma-separated)"
                   value={contact.tags.join(', ')}
                   readOnly={!canManage || userFieldRules['tags'] === 'read'}
-                  renderDisplay={(val) =>
+                  renderDisplay={(_val) =>
                     contact.tags.length > 0 ? (
                       <div className="flex flex-wrap gap-1">
                         {contact.tags.map((t) => (

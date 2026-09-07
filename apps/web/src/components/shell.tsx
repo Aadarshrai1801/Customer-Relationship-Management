@@ -25,6 +25,10 @@ const NAV: Array<{ to: string; label: string; scope?: string }> = [
   { to: '/settings/billing', label: 'Billing', scope: 'org:manage' },
   { to: '/settings/notifications', label: 'Notifications', scope: 'notifications:read' },
   { to: '/settings/workflows', label: 'Workflows', scope: 'workflows:read' },
+  { to: '/settings/scheduling', label: 'Scheduling', scope: 'activities:read' },
+  { to: '/settings/approvals', label: 'Approvals', scope: 'deals:read' },
+  { to: '/settings/territories', label: 'Territories', scope: 'contacts:read' },
+  { to: '/settings/sla', label: 'SLAs', scope: 'org:read' },
   { to: '/settings/audit', label: 'Audit log', scope: 'audit:read' },
   { to: '/settings/profile', label: 'Settings' },
 ];

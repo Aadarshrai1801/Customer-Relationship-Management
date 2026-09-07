@@ -17,6 +17,11 @@ interface EmailLogResponse {
   nextCursor: string | null;
 }
 
+interface InboxResponse {
+  messages: SerializedEmailActivity[];
+  nextCursor: string | null;
+}
+
 function formatDate(value: string | null): string {
   if (!value) return '—';
   return new Date(value).toLocaleString(undefined, {
@@ -70,15 +75,22 @@ export function EmailsPage(): React.JSX.Element {
     queryFn: () => api<SuggestionsResponse>('/emails/suggestions?limit=50'),
   });
 
+  const inboxQuery = useQuery({
+    queryKey: ['email-inbox'],
+    queryFn: () => api<InboxResponse>('/emails/inbox/list?limit=50'),
+  });
+
   function refresh(): void {
     void queryClient.invalidateQueries({ queryKey: ['email-log'] });
     void queryClient.invalidateQueries({ queryKey: ['email-templates'] });
     void queryClient.invalidateQueries({ queryKey: ['email-suggestions'] });
+    void queryClient.invalidateQueries({ queryKey: ['email-inbox'] });
   }
 
   const log = logQuery.data?.activities ?? [];
   const templates = templatesQuery.data ?? [];
   const suggestions = suggestionsQuery.data?.suggestions ?? [];
+  const inbox = inboxQuery.data?.messages ?? [];
 
   return (
     <div className="flex flex-col gap-4">
@@ -196,6 +208,27 @@ export function EmailsPage(): React.JSX.Element {
       )}
 
       <Card
+        title="Team inbox"
+        description="Every inbound email in one triage queue — claim one to take ownership."
+      >
+        {inboxQuery.isLoading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : inboxQuery.isError ? (
+          <div className="rounded bg-danger-soft p-4 text-sm text-danger">
+            Could not load inbox: {inboxQuery.error?.message}
+          </div>
+        ) : inbox.length === 0 ? (
+          <p className="text-xs italic text-text-secondary">Inbox zero. Nice.</p>
+        ) : (
+          <ul className="flex flex-col gap-2 text-xs">
+            {inbox.map((m) => (
+              <InboxRow key={m.id} message={m} onClaimed={refresh} canManage={canManage} />
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Card
         title="Templates"
         description="Reusable subjects and bodies with {{variable}} placeholders."
       >
@@ -222,6 +255,55 @@ export function EmailsPage(): React.JSX.Element {
         onSent={refresh}
       />
     </div>
+  );
+}
+
+function InboxRow({
+  message,
+  onClaimed,
+  canManage,
+}: {
+  message: SerializedEmailActivity;
+  onClaimed: () => void;
+  canManage: boolean;
+}): React.JSX.Element {
+  const { notify } = useToast();
+  const claimMutation = useMutation({
+    mutationFn: () => api(`/emails/inbox/${message.id}/claim`, { method: 'POST', body: {} }),
+    onSuccess: () => {
+      onClaimed();
+      notify('success', 'Message claimed');
+    },
+    onError: (err: Error) => notify('error', err.message || 'Claim failed'),
+  });
+  return (
+    <li
+      aria-label={`Inbox message ${message.subject ?? '(no subject)'}`}
+      className="flex flex-col gap-1 rounded-lg border border-border px-4 py-3"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium text-text-primary">
+          {message.subject ?? '(no subject)'}
+        </span>
+        {message.owner ? (
+          <span className="text-text-secondary">· {message.owner.name}</span>
+        ) : (
+          <Badge tone="warning">unclaimed</Badge>
+        )}
+        {canManage && (
+          <Button
+            variant="ghost"
+            onClick={() => claimMutation.mutate()}
+            className="ml-auto h-7 text-xs"
+          >
+            Claim
+          </Button>
+        )}
+      </div>
+      <p className="text-text-secondary">
+        From {message.senderEmail ?? '—'} · {formatDate(message.occurredAt)}
+      </p>
+    </li>
   );
 }
 

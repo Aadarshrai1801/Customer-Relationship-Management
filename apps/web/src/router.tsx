@@ -45,6 +45,11 @@ import { EmailsPage } from './pages/emails/emails-page';
 import { ReportsPage } from './pages/reports/reports-page';
 import { WebToLeadPage } from './pages/settings/web-to-lead';
 import { LeadRoutingPage } from './pages/settings/lead-routing';
+import { SchedulingPage } from './pages/settings/scheduling';
+import { ApprovalsPage } from './pages/settings/approvals';
+import { TerritoriesPage } from './pages/settings/territories';
+import { SlaPage } from './pages/settings/sla';
+import { PublicBookingPage } from './pages/scheduling/public-booking';
 
 function ProtectedLayout(): React.JSX.Element {
   const { user, loading } = useAuth();
@@ -114,6 +119,33 @@ const workflowsRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/settings/workflows',
   component: WorkflowsPage,
+});
+
+// Module 14 Routes
+const schedulingRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/settings/scheduling',
+  component: SchedulingPage,
+});
+const approvalsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/settings/approvals',
+  component: ApprovalsPage,
+});
+const territoriesRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/settings/territories',
+  component: TerritoriesPage,
+});
+const slaRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/settings/sla',
+  component: SlaPage,
+});
+const publicBookingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/book/$slug',
+  component: PublicBookingPage,
 });
 
 // Module 4 Routes
@@ -297,6 +329,10 @@ const routeTree = rootRoute.addChildren([
     notificationsRoute,
     sequencesRoute,
     workflowsRoute,
+    schedulingRoute,
+    approvalsRoute,
+    territoriesRoute,
+    slaRoute,
     dealsRoute,
     dealDetailRoute,
     tasksRoute,
@@ -329,6 +365,7 @@ const routeTree = rootRoute.addChildren([
   ssoSuccessRoute,
   ssoErrorRoute,
   publicQuoteRoute,
+  publicBookingRoute,
 ]);
 
 export const router = createRouter({ routeTree });
