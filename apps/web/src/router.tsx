@@ -32,6 +32,7 @@ import { DedupQueuePage } from './pages/duplicates/dedup-queue';
 import { ImportsWizardPage } from './pages/imports/imports-wizard';
 import { LeadsListPage } from './pages/leads/leads-list';
 import { LeadDetailPage } from './pages/leads/lead-detail';
+import { PipelineBoardPage } from './pages/deals/pipeline-board';
 import { WebToLeadPage } from './pages/settings/web-to-lead';
 import { LeadRoutingPage } from './pages/settings/lead-routing';
 
@@ -67,6 +68,13 @@ const homeRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/',
   component: HomePage,
+});
+
+// Module 4 Routes
+const dealsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/deals',
+  component: PipelineBoardPage,
 });
 
 // Module 3 Routes
@@ -212,6 +220,7 @@ const ssoErrorRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   protectedRoute.addChildren([
     homeRoute,
+    dealsRoute,
     leadsRoute,
     leadDetailRoute,
     contactsRoute,
@@ -251,4 +260,3 @@ declare module '@tanstack/react-router' {
 export function AppRouter(): React.JSX.Element {
   return <RouterProvider router={router} />;
 }
-

@@ -315,4 +315,12 @@ describe('deals core crud, scoping, and custom fields', () => {
       .query({ action: 'deal.deleted', entityId: id });
     expect(audit.body.entries).toHaveLength(1);
   });
+
+  it('lists line items for the Closed-Won prompt (empty by default)', async () => {
+    const created = await ownerAgent.post('/v1/deals').send({ name: 'No Lines', amount: 10 });
+    const id = created.body.deal.id as string;
+    const items = await ownerAgent.get(`/v1/deals/${id}/line-items`);
+    expect(items.status).toBe(200);
+    expect(items.body).toEqual([]);
+  });
 });

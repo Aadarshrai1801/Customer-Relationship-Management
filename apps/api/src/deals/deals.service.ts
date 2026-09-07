@@ -10,6 +10,7 @@ import {
   accounts,
   contactNotes,
   contacts,
+  dealLineItems,
   deals,
   dealStageHistory,
   exchangeRates,
@@ -679,6 +680,25 @@ export class DealsService {
         newValues: { lifecycleStage: 'customer' },
       });
     }
+  }
+
+  /**
+   * Minimal line-items read surface: enough for the Closed-Won prompt
+   * ("add products?") and the M4-PR6 detail view. Full line-item write
+   * APIs arrive with the quoting pass, not this module.
+   */
+  async lineItems(
+    auth: AuthContext,
+    id: string,
+  ): Promise<Array<typeof dealLineItems.$inferSelect>> {
+    return this.tenantDb.tx(auth.org.id, async (db) => {
+      const row = await this.requireLiveDeal(db, auth.org.id, id);
+      this.assertDealReadable(auth, row.deal.ownerId);
+      return db
+        .select()
+        .from(dealLineItems)
+        .where(and(eq(dealLineItems.dealId, row.deal.id), eq(dealLineItems.orgId, auth.org.id)));
+    });
   }
 
   async history(

@@ -264,13 +264,12 @@ describe('privacy (gdpr export + erasure)', () => {
     expect(foreign.status).toBe(404);
 
     // The scheduled purge handler delegates to the audited purge with the
-    // 12-month floor intact.
+    // 12-month floor intact. Assert on the purge result (not a global row
+    // count — other test files insert audit rows concurrently).
     const tasks = app.get(AuditRetentionTasks);
-    const before = await db.query('SELECT count(*)::int AS n FROM audit_log_entries');
     const result = await tasks.runRetentionPurge();
     expect(result.retentionDays).toBe(365);
-    const after = await db.query('SELECT count(*)::int AS n FROM audit_log_entries');
-    expect(after.rows[0].n).toBe(before.rows[0].n);
+    expect(result.deleted).toBe(0);
 
     // A stale export file on disk is removed by the expiry worker.
     const stale = await otherAgent.post('/v1/privacy/export');

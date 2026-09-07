@@ -96,6 +96,12 @@ export class DealsController {
   }
 
   @RequireScopes('deals:read')
+  @Get(':id/line-items')
+  async lineItems(@Req() req: Request, @Param('id') id: string): Promise<unknown> {
+    return this.deals.lineItems(authOf(req), id);
+  }
+
+  @RequireScopes('deals:read')
   @Get('forecast/by-pipeline')
   async forecast(
     @Req() req: Request,

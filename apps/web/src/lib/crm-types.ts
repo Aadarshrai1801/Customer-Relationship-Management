@@ -1,21 +1,8 @@
 export type LifecycleStage =
-  | 'lead'
-  | 'mql'
-  | 'sql'
-  | 'opportunity'
-  | 'customer'
-  | 'evangelist'
-  | 'other';
+  'lead' | 'mql' | 'sql' | 'opportunity' | 'customer' | 'evangelist' | 'other';
 
 export type CustomFieldType =
-  | 'text'
-  | 'number'
-  | 'date'
-  | 'picklist'
-  | 'multi_select'
-  | 'checkbox'
-  | 'currency'
-  | 'formula';
+  'text' | 'number' | 'date' | 'picklist' | 'multi_select' | 'checkbox' | 'currency' | 'formula';
 
 export interface CustomFieldDef {
   id: string;
@@ -144,7 +131,14 @@ export interface ImportJobStats {
 export interface ImportJobDetail {
   id: string;
   entityType: 'contact' | 'account';
-  status: 'pending' | 'validating' | 'validated' | 'validation_failed' | 'importing' | 'completed' | 'failed';
+  status:
+    | 'pending'
+    | 'validating'
+    | 'validated'
+    | 'validation_failed'
+    | 'importing'
+    | 'completed'
+    | 'failed';
   mapping: Record<string, string>;
   stats: ImportJobStats;
   error?: string | null;
@@ -160,6 +154,83 @@ export interface UploadResponse {
   totalRows: number;
   sampleRows: Array<Record<string, string>>;
   suggestedMapping: Record<string, string>;
+}
+
+export type DealStatus = 'open' | 'won' | 'lost';
+
+export interface DealStageRef {
+  id: string;
+  key: string;
+  name: string;
+  position: number;
+  probability: number;
+  isClosedWon: boolean;
+  isClosedLost: boolean;
+}
+
+export interface SerializedDeal {
+  id: string;
+  pipeline: { id: string; name: string; slug: string };
+  stage: DealStageRef;
+  account: { id: string; name: string } | null;
+  contact: { id: string; name: string; email: string } | null;
+  owner: { id: string; name: string } | null;
+  ownerId: string | null;
+  name: string;
+  amount: number;
+  currency: string;
+  baseCurrency: string;
+  baseAmount: number;
+  exchangeRate: number;
+  exchangeRateDate: string;
+  probability: number | null;
+  effectiveProbability: number;
+  weightedValue: number;
+  expectedCloseDate: string | null;
+  closeDateStatus: 'overdue' | 'due-soon' | 'on-track' | null;
+  status: DealStatus;
+  lossReason: string | null;
+  closedAt: string | null;
+  customFields: Record<string, unknown>;
+  computedFields: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  [key: string]: unknown;
+}
+
+export interface PipelineWithStages {
+  pipeline: {
+    id: string;
+    name: string;
+    slug: string;
+    description: string | null;
+    isDefault: boolean;
+  };
+  stages: DealStageRef[];
+}
+
+export interface ForecastStage {
+  stage: { id: string; key: string; name: string; position: number; probability: number };
+  dealCount: number;
+  totalBaseAmount: number;
+  weightedValue: number;
+  overdueCount: number;
+  overdueBaseAmount: number;
+}
+
+export interface ForecastResponse {
+  pipeline: { id: string; name: string; slug: string };
+  baseCurrency: string;
+  stages: ForecastStage[];
+  totals: { dealCount: number; totalBaseAmount: number; weightedValue: number };
+}
+
+export interface DealLineItem {
+  id: string;
+  name: string;
+  quantity: string;
+  unitPrice: string;
+  currency: string;
 }
 
 export type LeadStatus = 'new' | 'contacted' | 'qualified' | 'unqualified' | 'converted';
@@ -257,4 +328,3 @@ export interface WebToLeadSnippetResponse {
   endpointUrl?: string;
   fields?: string[];
 }
-
