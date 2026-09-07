@@ -4,6 +4,13 @@ export const TASK_STATUSES = ['open', 'completed', 'cancelled'] as const;
 export const TASK_PRIORITIES = ['low', 'normal', 'high'] as const;
 export const ACTIVITY_TYPES = ['call', 'meeting', 'email', 'task'] as const;
 
+const recurrenceSchema = z
+  .object({
+    frequency: z.enum(['daily', 'weekly', 'monthly']),
+    interval: z.number().int().min(1).max(12).default(1),
+  })
+  .strict();
+
 const isoDateTime = z.string().datetime({ offset: true });
 
 export const createTaskSchema = z
@@ -14,6 +21,7 @@ export const createTaskSchema = z
     priority: z.enum(TASK_PRIORITIES).default('normal'),
     dueAt: isoDateTime.optional(),
     remindAt: isoDateTime.optional(),
+    recurrence: recurrenceSchema.nullable().optional(),
     ownerId: z.string().uuid().optional(),
     contactId: z.string().uuid().optional(),
     accountId: z.string().uuid().optional(),
@@ -29,6 +37,7 @@ export const updateTaskSchema = z
     priority: z.enum(TASK_PRIORITIES).optional(),
     dueAt: isoDateTime.nullable().optional(),
     remindAt: isoDateTime.nullable().optional(),
+    recurrence: recurrenceSchema.nullable().optional(),
     ownerId: z.string().uuid().nullable().optional(),
     contactId: z.string().uuid().nullable().optional(),
     accountId: z.string().uuid().nullable().optional(),

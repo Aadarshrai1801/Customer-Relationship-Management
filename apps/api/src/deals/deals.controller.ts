@@ -12,17 +12,21 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import type { Request } from 'express';
+import { z } from 'zod';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { RequireScopes } from '../rbac/require-scopes.decorator';
+import { CompetitorsService } from './competitors.service';
 import { DealsService } from './deals.service';
 import {
   createDealSchema,
   listDealsQuerySchema,
   addLineItemSchema,
+  stalledDealsQuerySchema,
   updateDealSchema,
   type AddLineItemInput,
   type CreateDealInput,
   type ListDealsQuery,
+  type StalledDealsQuery,
   type UpdateDealInput,
 } from './deals.schemas';
 import {
@@ -57,6 +61,15 @@ export class DealsController {
     @Query(new ZodValidationPipe(listDealsQuerySchema)) query: unknown,
   ): Promise<unknown> {
     return this.deals.list(authOf(req), query as ListDealsQuery);
+  }
+
+  @RequireScopes('deals:read')
+  @Get('stalled')
+  async stalled(
+    @Req() req: Request,
+    @Query(new ZodValidationPipe(stalledDealsQuerySchema)) query: unknown,
+  ): Promise<unknown> {
+    return this.deals.stalled(authOf(req), query as StalledDealsQuery);
   }
 
   @RequireScopes('deals:read')
@@ -131,5 +144,35 @@ export class DealsController {
   ): Promise<unknown> {
     const { pipelineId, ownerId, status } = query as ForecastQuery;
     return this.deals.forecast(authOf(req), pipelineId, { ownerId, status });
+  }
+}
+
+const createCompetitorSchema = z
+  .object({ name: z.string().trim().min(1, 'Name is required').max(100) })
+  .strict();
+
+@Controller('competitors')
+export class CompetitorsController {
+  constructor(@Inject(CompetitorsService) private readonly competitors: CompetitorsService) {}
+
+  @RequireScopes('deals:read')
+  @Get()
+  async list(@Req() req: Request): Promise<unknown> {
+    return this.competitors.list(authOf(req));
+  }
+
+  @RequireScopes('deals:manage')
+  @Post()
+  async create(
+    @Req() req: Request,
+    @Body(new ZodValidationPipe(createCompetitorSchema)) body: unknown,
+  ): Promise<unknown> {
+    return this.competitors.create(authOf(req), (body as { name: string }).name);
+  }
+
+  @RequireScopes('deals:manage')
+  @Delete(':id')
+  async remove(@Req() req: Request, @Param('id') id: string): Promise<unknown> {
+    return this.competitors.remove(authOf(req), id);
   }
 }

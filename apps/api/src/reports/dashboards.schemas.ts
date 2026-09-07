@@ -7,6 +7,7 @@ export const DASHBOARD_WIDGET_TYPES = [
   'conversion-funnel',
   'overdue-tasks',
   'recent-activities',
+  'stalled-deals',
 ] as const;
 
 const widgetSchema = z

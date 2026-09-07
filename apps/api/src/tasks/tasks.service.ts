@@ -47,6 +47,7 @@ export interface SerializedTask {
   remindAt: Date | null;
   reminderSentAt: Date | null;
   completedAt: Date | null;
+  recurrence: { frequency: string; interval: number } | null;
   overdue: boolean;
   reminderDue: boolean;
   createdAt: Date;
@@ -90,6 +91,44 @@ function recordForbidden(): never {
     message: 'Not allowed to access this record',
     code: 'RECORD_FORBIDDEN',
   });
+}
+
+/**
+ * Next-occurrence shift for recurring tasks (PRD 4.4 P1). Monthly shifts
+ * clamp to month-end (Jan 31 + 1 month = Feb 28/29), matching calendar UX.
+ */
+export function shiftRecurrence(from: Date, rule: { frequency: string; interval: number }): Date {
+  const next = new Date(from.getTime());
+  if (rule.frequency === 'daily') {
+    next.setUTCDate(next.getUTCDate() + rule.interval);
+    return next;
+  }
+  if (rule.frequency === 'weekly') {
+    next.setUTCDate(next.getUTCDate() + 7 * rule.interval);
+    return next;
+  }
+  const day = next.getUTCDate();
+  next.setUTCDate(1);
+  next.setUTCMonth(next.getUTCMonth() + rule.interval);
+  const monthDays = new Date(
+    Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  next.setUTCDate(Math.min(day, monthDays));
+  return next;
+}
+
+function parseRecurrence(value: unknown): { frequency: string; interval: number } | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'object') return null;
+  const rule = value as Record<string, unknown>;
+  const frequency = rule['frequency'];
+  if (frequency !== 'daily' && frequency !== 'weekly' && frequency !== 'monthly') return null;
+  const interval = rule['interval'];
+  return {
+    frequency,
+    interval:
+      typeof interval === 'number' && Number.isInteger(interval) && interval >= 1 ? interval : 1,
+  };
 }
 
 function isOverdue(status: string, dueAt: Date | null, now: Date): boolean {
@@ -138,6 +177,7 @@ export class TasksService {
           dueAt: input.dueAt ? new Date(input.dueAt) : null,
           remindAt: input.remindAt ? new Date(input.remindAt) : null,
           completedAt: input.status === 'completed' ? new Date() : null,
+          recurrence: input.recurrence ?? null,
         })
         .returning();
       if (!created) throw new Error('Task insert returned no row');
@@ -290,6 +330,7 @@ export class TasksService {
             ? { accountId: patch.accountId ? links.accountId : null }
             : {}),
           ...(patch.dealId !== undefined ? { dealId: patch.dealId ? links.dealId : null } : {}),
+          ...(patch.recurrence !== undefined ? { recurrence: patch.recurrence } : {}),
           ...(!wasCompleted && nowCompleted ? { completedAt: new Date() } : {}),
           ...(wasCompleted && !nowCompleted ? { completedAt: null } : {}),
           updatedAt: new Date(),
@@ -313,6 +354,7 @@ export class TasksService {
       });
       if (!wasCompleted && nowCompleted) {
         await this.logCompletionActivity(db, auth, updated.id, updated);
+        await this.spawnNextOccurrence(db, auth, updated);
       }
       const beforeScalars: Record<string, unknown> = {
         title: row.title,
@@ -354,17 +396,22 @@ export class TasksService {
   /**
    * Explicit completion with an auto-logged task activity for the timeline.
    * Idempotent: completing an already-completed task reports changed=false
-   * and does not duplicate the activity entry.
+   * and does not duplicate the activity entry. Recurring tasks spawn their
+   * next independent occurrence (same rule, shifted dates).
    */
   async complete(
     auth: AuthContext,
     id: string,
-  ): Promise<{ task: SerializedTask; changed: boolean }> {
+  ): Promise<{ task: SerializedTask; changed: boolean; nextTaskId: string | null }> {
     return this.tenantDb.tx(auth.org.id, async (db) => {
       const row = await this.requireLiveTask(db, auth.org.id, id);
       this.assertTaskReadable(auth, row.ownerId);
       if (row.status === 'completed') {
-        return { task: await this.serializeById(db, auth, row.id), changed: false };
+        return {
+          task: await this.serializeById(db, auth, row.id),
+          changed: false,
+          nextTaskId: null,
+        };
       }
       const [updated] = await db
         .update(tasks)
@@ -383,8 +430,55 @@ export class TasksService {
         newValues: { status: 'completed' },
       });
       await this.logCompletionActivity(db, auth, updated.id, updated);
-      return { task: await this.serializeById(db, auth, updated.id), changed: true };
+      let nextTaskId: string | null = null;
+      nextTaskId = await this.spawnNextOccurrence(db, auth, updated);
+      return { task: await this.serializeById(db, auth, updated.id), changed: true, nextTaskId };
     });
+  }
+
+  /**
+   * Spawns the next independent occurrence of a recurring task. Returns
+   * the new id, or null when the task does not recur. Shared by explicit
+   * completion and PATCH-to-completed so both paths behave identically.
+   */
+  private async spawnNextOccurrence(
+    db: NexusDb,
+    auth: AuthContext,
+    updated: typeof tasks.$inferSelect,
+  ): Promise<string | null> {
+    const rule = parseRecurrence(updated.recurrence);
+    if (!rule) return null;
+    const anchor = updated.dueAt ?? new Date();
+    const shiftedDue = shiftRecurrence(anchor, rule);
+    const dueDeltaMs = shiftedDue.getTime() - anchor.getTime();
+    const [next] = await db
+      .insert(tasks)
+      .values({
+        orgId: auth.org.id,
+        ownerId: updated.ownerId,
+        contactId: updated.contactId,
+        accountId: updated.accountId,
+        dealId: updated.dealId,
+        title: updated.title,
+        description: updated.description,
+        status: 'open',
+        priority: updated.priority,
+        dueAt: shiftedDue,
+        remindAt: updated.remindAt ? new Date(updated.remindAt.getTime() + dueDeltaMs) : null,
+        recurrence: updated.recurrence,
+      })
+      .returning();
+    if (!next) throw new Error('Recurrence insert returned no row');
+    await this.audit.record(db, {
+      orgId: auth.org.id,
+      actorUserId: auth.user.id,
+      actorEmail: auth.user.email,
+      action: 'task.created',
+      entityType: 'task',
+      entityId: next.id,
+      newValues: { title: next.title, status: next.status, recurringFrom: updated.id },
+    });
+    return next.id;
   }
 
   async remove(auth: AuthContext, id: string): Promise<{ ok: true }> {
@@ -690,6 +784,7 @@ export class TasksService {
       remindAt: task.remindAt,
       reminderSentAt: task.reminderSentAt,
       completedAt: task.completedAt,
+      recurrence: parseRecurrence(task.recurrence),
       overdue: isOverdue(task.status, task.dueAt, now),
       reminderDue: isReminderDue(task.status, task.remindAt, task.reminderSentAt, now),
       createdAt: task.createdAt,

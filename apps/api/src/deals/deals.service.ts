@@ -5,9 +5,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   accounts,
+  activities,
+  auditLogEntries,
+  comments,
+  competitors,
   contactNotes,
   contacts,
   dealLineItems,
@@ -39,6 +43,7 @@ import type {
   AddLineItemInput,
   CreateDealInput,
   ListDealsQuery,
+  StalledDealsQuery,
   UpdateDealInput,
 } from './deals.schemas';
 
@@ -74,6 +79,7 @@ export interface SerializedDeal {
   lossReason: string | null;
   closedAt: Date | null;
   forecastCategory: 'pipeline' | 'best_case' | 'commit';
+  competitor: { id: string; name: string } | null;
   customFields: Record<string, unknown>;
   computedFields: Record<string, unknown>;
   createdAt: Date;
@@ -149,6 +155,9 @@ export class DealsService {
       const contact = input.contactId
         ? await this.requireContact(db, auth.org.id, input.contactId)
         : null;
+      const competitorId = input.competitorId
+        ? (await this.requireCompetitor(db, auth.org.id, input.competitorId)).id
+        : null;
       const ownerId = await this.resolveOwnerForCreate(db, auth, input.ownerId);
       const { values: customFields, issues } = validateCustomFields(defs, input.customFields);
       if (issues.length > 0) {
@@ -187,6 +196,7 @@ export class DealsService {
           name: input.name,
           amount: String(input.amount),
           currency: input.currency,
+          competitorId,
           baseCurrency: converted.baseCurrency,
           baseAmount: String(converted.baseAmount),
           exchangeRate: String(converted.exchangeRate),
@@ -231,6 +241,7 @@ export class DealsService {
           baseAmount: created.baseAmount,
           baseCurrency: created.baseCurrency,
           ownerId: created.ownerId,
+          competitorId: created.competitorId,
         },
       });
       const [owner] = created.ownerId
@@ -335,6 +346,10 @@ export class DealsService {
         .orderBy(desc(deals.createdAt), desc(deals.id))
         .limit(limit + 1);
       const page = rows.slice(0, limit);
+      const competitorMap = await this.competitorMapFor(
+        db,
+        page.map((row) => row.deal.competitorId),
+      );
       const serialized = page.map((row) =>
         this.serializeJoined(
           auth,
@@ -345,6 +360,7 @@ export class DealsService {
           row.account,
           row.contact,
           row.owner,
+          row.deal.competitorId ? (competitorMap.get(row.deal.competitorId) ?? null) : null,
         ),
       );
       const last = page[page.length - 1];
@@ -368,6 +384,7 @@ export class DealsService {
         row.account,
         row.contact,
         row.owner,
+        await this.fetchCompetitor(db, row.deal.competitorId),
       );
     });
   }
@@ -393,6 +410,12 @@ export class DealsService {
       if (patch.contactId !== undefined) {
         contactId = patch.contactId
           ? (await this.requireContact(db, auth.org.id, patch.contactId)).id
+          : null;
+      }
+      let competitorId = row.deal.competitorId;
+      if (patch.competitorId !== undefined) {
+        competitorId = patch.competitorId
+          ? (await this.requireCompetitor(db, auth.org.id, patch.competitorId)).id
           : null;
       }
       let ownerId = row.deal.ownerId;
@@ -453,6 +476,7 @@ export class DealsService {
         name: row.deal.name,
         accountId: row.deal.accountId,
         contactId: row.deal.contactId,
+        competitorId: row.deal.competitorId,
         ownerId: row.deal.ownerId,
         amount: row.deal.amount,
         currency: row.deal.currency,
@@ -466,6 +490,7 @@ export class DealsService {
         .set({
           accountId,
           contactId,
+          competitorId,
           ownerId,
           name: patch.name ?? row.deal.name,
           amount: String(amount),
@@ -493,6 +518,7 @@ export class DealsService {
         name: updated.name,
         accountId: updated.accountId,
         contactId: updated.contactId,
+        competitorId: updated.competitorId,
         ownerId: updated.ownerId,
         amount: updated.amount,
         currency: updated.currency,
@@ -877,6 +903,169 @@ export class DealsService {
     });
   }
 
+  /**
+   * Rot/stagnation surfacing (PRD 4.3 P1): open deals whose last
+   * engagement predates the threshold (default 14 days, configurable per
+   * org via staleDealDays). Engagement = stage moves, linked activities,
+   * comments, or audited deal writes — whichever is newest.
+   */
+  async stalled(
+    auth: AuthContext,
+    query: StalledDealsQuery,
+  ): Promise<{
+    deals: Array<SerializedDeal & { daysInactive: number; lastActivityAt: Date }>;
+    thresholdDays: number;
+  }> {
+    return this.tenantDb.tx(auth.org.id, async (db) => {
+      const thresholdDays = query.daysInactive ?? (await this.staleThresholdDays(db, auth.org.id));
+      const limit = Math.min(Math.max(query.limit ?? 100, 1), 200);
+      const now = Date.now();
+      const conditions = [
+        eq(deals.orgId, auth.org.id),
+        eq(deals.status, 'open'),
+        isNull(deals.deletedAt),
+      ];
+      const canSeeAll = this.recordScope(auth) === 'all';
+      if (!canSeeAll) {
+        conditions.push(eq(deals.ownerId, auth.user.id));
+      }
+      const rows = await db
+        .select({
+          deal: deals,
+          pipeline: pipelines,
+          stage: pipelineStages,
+          account: accounts,
+          contact: contacts,
+          owner: users,
+        })
+        .from(deals)
+        .innerJoin(pipelines, eq(deals.pipelineId, pipelines.id))
+        .innerJoin(pipelineStages, eq(deals.stageId, pipelineStages.id))
+        .leftJoin(accounts, eq(deals.accountId, accounts.id))
+        .leftJoin(contacts, eq(deals.contactId, contacts.id))
+        .leftJoin(users, eq(deals.ownerId, users.id))
+        .where(and(...conditions))
+        .orderBy(desc(deals.createdAt), desc(deals.id))
+        .limit(500);
+      const ids = rows.map((row) => row.deal.id);
+      const maxByDeal = async (
+        query: Promise<Array<{ dealId: string | null; at: Date }>>,
+      ): Promise<Map<string, Date>> => {
+        if (ids.length === 0) return new Map();
+        const found = await query;
+        const map = new Map<string, Date>();
+        for (const r of found) {
+          if (r.dealId) map.set(r.dealId, new Date(r.at));
+        }
+        return map;
+      };
+      const [stageAt, activityAt, commentAt, auditAt] = await Promise.all([
+        maxByDeal(
+          db
+            .select({
+              dealId: dealStageHistory.dealId,
+              at: sql<Date>`max(${dealStageHistory.enteredAt})`,
+            })
+            .from(dealStageHistory)
+            .where(
+              and(eq(dealStageHistory.orgId, auth.org.id), inArray(dealStageHistory.dealId, ids)),
+            )
+            .groupBy(dealStageHistory.dealId),
+        ),
+        maxByDeal(
+          db
+            .select({
+              dealId: activities.dealId,
+              at: sql<Date>`max(${activities.occurredAt})`,
+            })
+            .from(activities)
+            .where(and(eq(activities.orgId, auth.org.id), inArray(activities.dealId, ids)))
+            .groupBy(activities.dealId),
+        ),
+        maxByDeal(
+          db
+            .select({
+              dealId: comments.entityId,
+              at: sql<Date>`max(${comments.createdAt})`,
+            })
+            .from(comments)
+            .where(
+              and(
+                eq(comments.orgId, auth.org.id),
+                eq(comments.entityType, 'deal'),
+                inArray(comments.entityId, ids),
+              ),
+            )
+            .groupBy(comments.entityId),
+        ),
+        maxByDeal(
+          db
+            .select({
+              dealId: auditLogEntries.entityId,
+              at: sql<Date>`max(${auditLogEntries.createdAt})`,
+            })
+            .from(auditLogEntries)
+            .where(
+              and(
+                eq(auditLogEntries.orgId, auth.org.id),
+                eq(auditLogEntries.entityType, 'deal'),
+                sql`${auditLogEntries.action} IN ('deal.updated', 'deal.stage_changed', 'deal.created')`,
+                inArray(auditLogEntries.entityId, ids),
+              ),
+            )
+            .groupBy(auditLogEntries.entityId),
+        ),
+      ]);
+      const defs = await this.fields.loadDefinitions(db, auth.org.id, 'deal');
+      const competitorMap = await this.competitorMapFor(
+        db,
+        rows.map((row) => row.deal.competitorId),
+      );
+      const scored: Array<{
+        row: (typeof rows)[number];
+        daysInactive: number;
+        lastActivityAt: Date;
+      }> = [];
+      for (const row of rows) {
+        const candidates = [
+          stageAt.get(row.deal.id),
+          activityAt.get(row.deal.id),
+          commentAt.get(row.deal.id),
+          auditAt.get(row.deal.id),
+          row.deal.createdAt,
+        ].filter((d): d is Date => d instanceof Date && !Number.isNaN(d.getTime()));
+        const last =
+          candidates.length > 0
+            ? new Date(Math.max(...candidates.map((d) => d.getTime())))
+            : row.deal.createdAt;
+        const daysInactive = Math.floor((now - last.getTime()) / 86400000);
+        if (daysInactive >= thresholdDays) {
+          scored.push({ row, daysInactive, lastActivityAt: last });
+        }
+      }
+      scored.sort((a, b) => b.daysInactive - a.daysInactive);
+      const page = scored.slice(0, limit);
+      return {
+        deals: page.map(({ row, daysInactive, lastActivityAt }) => ({
+          ...this.serializeJoined(
+            auth,
+            defs,
+            row.deal,
+            row.pipeline,
+            row.stage,
+            row.account,
+            row.contact,
+            row.owner,
+            row.deal.competitorId ? (competitorMap.get(row.deal.competitorId) ?? null) : null,
+          ),
+          daysInactive,
+          lastActivityAt,
+        })),
+        thresholdDays,
+      };
+    });
+  }
+
   async history(
     auth: AuthContext,
     id: string,
@@ -1209,13 +1398,22 @@ export class DealsService {
     }
     return this.requireMember(db, auth.org.id, ownerId);
   }
-
   private async orgBaseCurrency(db: NexusDb, orgId: string): Promise<string> {
     const [org] = await db
       .select({ settings: organizations.settings })
       .from(organizations)
       .where(eq(organizations.id, orgId));
     return resolveBaseCurrency(org?.settings);
+  }
+
+  /** Rot threshold in days (PRD 4.3 default 14, configurable per org). */
+  private async staleThresholdDays(db: NexusDb, orgId: string): Promise<number> {
+    const [org] = await db
+      .select({ settings: organizations.settings })
+      .from(organizations)
+      .where(eq(organizations.id, orgId));
+    const raw = (org?.settings as { staleDealDays?: unknown } | null)?.staleDealDays;
+    return typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 && raw <= 365 ? raw : 14;
   }
 
   private async rateFor(
@@ -1285,7 +1483,58 @@ export class DealsService {
       row.account,
       row.contact,
       row.owner,
+      await this.fetchCompetitor(db, row.deal.competitorId),
     );
+  }
+
+  private async requireCompetitor(db: NexusDb, orgId: string, competitorId: string) {
+    const [competitor] = await db
+      .select({ id: competitors.id })
+      .from(competitors)
+      .where(
+        and(
+          eq(competitors.id, competitorId),
+          eq(competitors.orgId, orgId),
+          isNull(competitors.deletedAt),
+        ),
+      );
+    if (!competitor) {
+      throw new NotFoundException({
+        message: 'Competitor not found',
+        code: 'COMPETITOR_NOT_FOUND',
+      });
+    }
+    return competitor;
+  }
+
+  private async fetchCompetitor(
+    db: NexusDb,
+    competitorId: string | null,
+  ): Promise<{ id: string; name: string } | null> {
+    if (!competitorId) return null;
+    const [row] = await db
+      .select({ id: competitors.id, name: competitors.name })
+      .from(competitors)
+      .where(eq(competitors.id, competitorId));
+    return row ?? null;
+  }
+
+  private async competitorMapFor(
+    db: NexusDb,
+    ids: Array<string | null>,
+  ): Promise<Map<string, { id: string; name: string }>> {
+    const unique = [...new Set(ids.filter((id): id is string => id !== null))];
+    if (unique.length === 0) return new Map();
+    const rows = await db
+      .select({ id: competitors.id, name: competitors.name })
+      .from(competitors)
+      .where(
+        sql`${competitors.id} IN (${sql.join(
+          unique.map((id) => sql`${id}`),
+          sql`, `,
+        )})`,
+      );
+    return new Map(rows.map((row) => [row.id, row]));
   }
 
   private serialize(
@@ -1297,8 +1546,19 @@ export class DealsService {
     account: { id: string; name: string } | null,
     contact: { id: string; name: string; email: string } | null,
     owner: { id: string; name: string } | null,
+    competitor: { id: string; name: string } | null = null,
   ): SerializedDeal {
-    return this.serializeJoined(auth, defs, deal, pipeline, stage, account, contact, owner);
+    return this.serializeJoined(
+      auth,
+      defs,
+      deal,
+      pipeline,
+      stage,
+      account,
+      contact,
+      owner,
+      competitor,
+    );
   }
 
   private serializeJoined(
@@ -1310,6 +1570,7 @@ export class DealsService {
     account: { id: string; name: string } | null,
     contact: { id: string; name: string; email: string } | null,
     owner: { id: string; name: string } | null,
+    competitor: { id: string; name: string } | null = null,
   ): SerializedDeal {
     const { computed, errors } = computeFormulas(
       defs,
@@ -1350,6 +1611,7 @@ export class DealsService {
       lossReason: deal.lossReason,
       closedAt: deal.closedAt,
       forecastCategory: deal.forecastCategory,
+      competitor,
       customFields: this.filterCustom(deal.customFields, auth),
       computedFields: this.filterCustom(computed, auth),
       createdAt: deal.createdAt,

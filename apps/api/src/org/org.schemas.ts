@@ -21,10 +21,17 @@ export const updateSettingsSchema = z
       .max(100 * 1024 * 1024)
       .optional(),
     attachmentStorageCapBytes: z.number().int().min(1024).optional(),
+    staleDealDays: z.number().int().min(0).max(365).optional(),
   })
   .strict()
-  .refine((v) => v.maxAttachmentBytes !== undefined || v.attachmentStorageCapBytes !== undefined, {
-    message: 'Provide at least one setting to update',
-  });
+  .refine(
+    (v) =>
+      v.maxAttachmentBytes !== undefined ||
+      v.attachmentStorageCapBytes !== undefined ||
+      v.staleDealDays !== undefined,
+    {
+      message: 'Provide at least one setting to update',
+    },
+  );
 
 export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;

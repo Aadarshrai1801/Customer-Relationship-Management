@@ -17,6 +17,7 @@ export const createDealSchema = z
     accountId: z.string().uuid().optional(),
     contactId: z.string().uuid().optional(),
     ownerId: z.string().uuid().optional(),
+    competitorId: z.string().uuid().optional(),
     name: z.string().trim().min(1, 'Name is required').max(200),
     amount: z.number().finite().min(0).max(9999999999999.99),
     currency: isoCurrency.default('USD'),
@@ -33,6 +34,7 @@ export const updateDealSchema = z
     accountId: z.string().uuid().nullable().optional(),
     contactId: z.string().uuid().nullable().optional(),
     ownerId: z.string().uuid().nullable().optional(),
+    competitorId: z.string().uuid().nullable().optional(),
     name: z.string().trim().min(1).max(200).optional(),
     amount: z.number().finite().min(0).max(9999999999999.99).optional(),
     currency: isoCurrency.optional(),
@@ -57,6 +59,13 @@ export const listDealsQuerySchema = z
   })
   .strict();
 
+export const stalledDealsQuerySchema = z
+  .object({
+    daysInactive: z.coerce.number().int().min(0).max(365).optional(),
+    limit: z.coerce.number().int().min(1).max(200).optional(),
+  })
+  .strict();
+
 export const addLineItemSchema = z
   .object({
     productId: z.string().uuid().optional(),
@@ -72,4 +81,5 @@ export const addLineItemSchema = z
 export type CreateDealInput = z.infer<typeof createDealSchema>;
 export type UpdateDealInput = z.infer<typeof updateDealSchema>;
 export type ListDealsQuery = z.infer<typeof listDealsQuerySchema>;
+export type StalledDealsQuery = z.infer<typeof stalledDealsQuerySchema>;
 export type AddLineItemInput = z.infer<typeof addLineItemSchema>;

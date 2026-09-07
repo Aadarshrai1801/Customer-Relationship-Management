@@ -109,6 +109,7 @@ export class OrgService {
         ...(input.attachmentStorageCapBytes !== undefined
           ? { attachmentStorageCapBytes: input.attachmentStorageCapBytes }
           : {}),
+        ...(input.staleDealDays !== undefined ? { staleDealDays: input.staleDealDays } : {}),
       };
       const [next] = await db
         .update(organizations)
@@ -121,10 +122,12 @@ export class OrgService {
           maxAttachmentBytes: (org.settings as OrganizationSettings).maxAttachmentBytes,
           attachmentStorageCapBytes: (org.settings as OrganizationSettings)
             .attachmentStorageCapBytes,
+          staleDealDays: (org.settings as OrganizationSettings).staleDealDays,
         },
         {
           maxAttachmentBytes: nextSettings.maxAttachmentBytes,
           attachmentStorageCapBytes: nextSettings.attachmentStorageCapBytes,
+          staleDealDays: nextSettings.staleDealDays,
         },
       );
       if (Object.keys(newValues).length > 0) {
