@@ -9,7 +9,6 @@ import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import {
   attachments,
   comments,
-  contacts,
   deals,
   notifications,
   tasks,
@@ -203,12 +202,7 @@ export class CollaborationService {
     const result = await this.tenantDb.tx(auth.org.id, async (db) => {
       const row = await this.requireLiveComment(db, auth.org.id, id);
       this.assertCommentWritable(auth, row.authorId);
-      await this.assertParentReadable(
-        db,
-        auth,
-        row.entityType as CommentEntityType,
-        row.entityId,
-      );
+      await this.assertParentReadable(db, auth, row.entityType as CommentEntityType, row.entityId);
       const previous = new Set(row.mentionedUserIds ?? []);
       const mentioned = await this.resolveMentions(db, auth.org.id, auth.user.id, patch.body);
       const fresh = mentioned.filter((m) => !previous.has(m.id));
@@ -351,7 +345,10 @@ export class CollaborationService {
       row.attachment.entityType as CommentEntityType,
       row.attachment.entityId,
     );
-    return { attachment: row.attachment, serialized: this.serializeAttachment(row.attachment, row.owner) };
+    return {
+      attachment: row.attachment,
+      serialized: this.serializeAttachment(row.attachment, row.owner),
+    };
   }
 
   serializeAttachment(
@@ -478,9 +475,7 @@ export class CollaborationService {
       .select({ comment: comments, author: users })
       .from(comments)
       .leftJoin(users, eq(comments.authorId, users.id))
-      .where(
-        and(eq(comments.id, id), eq(comments.orgId, auth.org.id), isNull(comments.deletedAt)),
-      );
+      .where(and(eq(comments.id, id), eq(comments.orgId, auth.org.id), isNull(comments.deletedAt)));
     if (!row) {
       throw new NotFoundException({ message: 'Comment not found', code: 'COMMENT_NOT_FOUND' });
     }

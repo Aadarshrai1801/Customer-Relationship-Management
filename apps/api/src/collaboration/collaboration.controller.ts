@@ -107,7 +107,10 @@ export class AttachmentsController {
     @UploadedFile() file: Express.Multer.File | undefined,
     @Body(new ZodValidationPipe(uploadBodySchema)) body: unknown,
   ): Promise<unknown> {
-    const { entityType, entityId } = body as { entityType: 'contact' | 'deal' | 'task'; entityId: string };
+    const { entityType, entityId } = body as {
+      entityType: 'contact' | 'deal' | 'task';
+      entityId: string;
+    };
     if (!file) {
       throw new BadRequestException({ message: 'No file received', code: 'FILE_MISSING' });
     }

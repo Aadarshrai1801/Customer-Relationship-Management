@@ -81,9 +81,9 @@ describe('attachments upload, download, and caps', () => {
       .get('/v1/attachments')
       .query({ entityType: 'deal', entityId: dealId });
     expect(listed.status).toBe(200);
-    expect((listed.body.attachments as Array<{ id: string }>).some((a) => a.id === attachmentId)).toBe(
-      true,
-    );
+    expect(
+      (listed.body.attachments as Array<{ id: string }>).some((a) => a.id === attachmentId),
+    ).toBe(true);
 
     const downloaded = await ownerAgent.get(`/v1/attachments/${attachmentId}/download`);
     expect(downloaded.status).toBe(200);
@@ -101,7 +101,10 @@ describe('attachments upload, download, and caps', () => {
       .post('/v1/attachments/upload')
       .field('entityType', 'deal')
       .field('entityId', dealId)
-      .attach('file', Buffer.from('MZ'), { filename: 'run.exe', contentType: 'application/x-msdownload' });
+      .attach('file', Buffer.from('MZ'), {
+        filename: 'run.exe',
+        contentType: 'application/x-msdownload',
+      });
     expect(exe.status).toBe(400);
     expect(exe.body.code).toBe('FILE_TYPE_INVALID');
 

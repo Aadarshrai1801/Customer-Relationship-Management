@@ -87,9 +87,9 @@ describe('comments with @mentions', () => {
     );
 
     const notifs = await repAgent.get('/v1/notifications');
-    const mention = (notifs.body.items as Array<{ type: string; title: string; body: string }>).find(
-      (n) => n.type === 'mention',
-    );
+    const mention = (
+      notifs.body.items as Array<{ type: string; title: string; body: string }>
+    ).find((n) => n.type === 'mention');
     expect(mention).toBeDefined();
     expect(mention!.title).toContain('Cora Owner');
     expect(mention!.body).toContain('please review');
@@ -186,13 +186,17 @@ describe('comments with @mentions', () => {
       .get('/v1/comments')
       .query({ entityType: 'contact', entityId: contactId });
     expect(listed.status).toBe(200);
-    expect((listed.body.comments as Array<{ id: string }>).some((c) => c.id === commentId)).toBe(true);
+    expect((listed.body.comments as Array<{ id: string }>).some((c) => c.id === commentId)).toBe(
+      true,
+    );
 
     const removed = await ownerAgent.delete(`/v1/comments/${commentId}`).send();
     expect(removed.status).toBe(200);
     const after = await ownerAgent
       .get('/v1/comments')
       .query({ entityType: 'contact', entityId: contactId });
-    expect((after.body.comments as Array<{ id: string }>).some((c) => c.id === commentId)).toBe(false);
+    expect((after.body.comments as Array<{ id: string }>).some((c) => c.id === commentId)).toBe(
+      false,
+    );
   });
 });

@@ -174,5 +174,14 @@ describe('system role seeds', () => {
     expect(manager.permissions.recordAccess['dashboard']).toBe('all');
     expect(rep.permissions.recordAccess['dashboard']).toBe('own');
     expect(viewer.permissions.recordAccess['dashboard']).toBe('own');
+    expect(hasScope(admin.permissions, 'comments:manage')).toBe(true);
+    expect(hasScope(manager.permissions, 'comments:manage')).toBe(true);
+    expect(hasScope(rep.permissions, 'comments:manage')).toBe(true);
+    expect(hasScope(viewer.permissions, 'comments:manage')).toBe(false);
+    expect(hasScope(viewer.permissions, 'comments:read')).toBe(true);
+    expect(hasScope(admin.permissions, 'attachments:manage')).toBe(true);
+    expect(hasScope(manager.permissions, 'attachments:manage')).toBe(true);
+    expect(hasScope(rep.permissions, 'attachments:manage')).toBe(true);
+    expect(hasScope(viewer.permissions, 'attachments:manage')).toBe(false);
   });
 });
