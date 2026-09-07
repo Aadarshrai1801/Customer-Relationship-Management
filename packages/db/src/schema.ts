@@ -292,6 +292,32 @@ export type Activity = typeof activities.$inferSelect;
 export type NewActivity = typeof activities.$inferInsert;
 export type EmailTemplate = typeof emailTemplates.$inferSelect;
 export type NewEmailTemplate = typeof emailTemplates.$inferInsert;
+export type Dashboard = typeof dashboards.$inferSelect;
+export type NewDashboard = typeof dashboards.$inferInsert;
+
+/**
+ * Module 7 (PRD 4.8 P0): user-customizable dashboards. layout is an
+ * ordered array of { key, type, title?, config? } widget descriptors;
+ * widget types are validated in the API (dashboard widget enum), not by
+ * a DB check constraint, so new widgets never need a migration.
+ */
+export const dashboards = pgTable(
+  'dashboards',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    isDefault: boolean('is_default').notNull().default(false),
+    layout: jsonb('layout').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_dashboards_org_owner').on(t.orgId, t.ownerId)],
+);
 
 /**
  * Module 6 (PRD 4.5 P0): reusable email templates with {{variable}}
@@ -766,6 +792,11 @@ export const deals = pgTable(
     status: text('status').$type<'open' | 'won' | 'lost'>().notNull().default('open'),
     lossReason: text('loss_reason'),
     closedAt: timestamp('closed_at', { withTimezone: true }),
+    // Module 7 (PRD 4.8): forecast rollup bucket — pipeline | best_case | commit.
+    forecastCategory: text('forecast_category')
+      .$type<'pipeline' | 'best_case' | 'commit'>()
+      .notNull()
+      .default('pipeline'),
     customFields: jsonb('custom_fields').$type<Record<string, unknown>>().notNull().default({}),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

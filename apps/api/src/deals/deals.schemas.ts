@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 const customFieldsSchema = z.record(z.string(), z.unknown()).default({});
 
+const forecastCategorySchema = z.enum(['pipeline', 'best_case', 'commit']);
+
 const isoCurrency = z
   .string()
   .trim()
@@ -19,6 +21,7 @@ export const createDealSchema = z
     amount: z.number().finite().min(0).max(9999999999999.99),
     currency: isoCurrency.default('USD'),
     probability: z.number().int().min(0).max(100).optional(),
+    forecastCategory: forecastCategorySchema.default('pipeline'),
     expectedCloseDate: z.string().datetime({ offset: true }).optional(),
     lossReason: z.string().trim().max(500).optional(),
     customFields: customFieldsSchema,
@@ -34,6 +37,7 @@ export const updateDealSchema = z
     amount: z.number().finite().min(0).max(9999999999999.99).optional(),
     currency: isoCurrency.optional(),
     probability: z.number().int().min(0).max(100).nullable().optional(),
+    forecastCategory: forecastCategorySchema.optional(),
     expectedCloseDate: z.string().datetime({ offset: true }).nullable().optional(),
     customFields: z.record(z.string(), z.unknown()).nullable().optional(),
   })

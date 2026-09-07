@@ -162,5 +162,17 @@ describe('system role seeds', () => {
     expect(viewer.permissions.recordAccess['task']).toBe('own');
     expect(admin.permissions.recordAccess['activity']).toBe('all');
     expect(rep.permissions.recordAccess['activity']).toBe('own');
+    expect(hasScope(admin.permissions, 'reports:read')).toBe(true);
+    expect(hasScope(manager.permissions, 'reports:read')).toBe(true);
+    expect(hasScope(rep.permissions, 'reports:read')).toBe(true);
+    expect(hasScope(viewer.permissions, 'reports:read')).toBe(true);
+    expect(hasScope(admin.permissions, 'dashboards:manage')).toBe(true);
+    expect(hasScope(manager.permissions, 'dashboards:manage')).toBe(false);
+    expect(hasScope(rep.permissions, 'dashboards:manage')).toBe(true);
+    expect(hasScope(viewer.permissions, 'dashboards:manage')).toBe(false);
+    expect(admin.permissions.recordAccess['dashboard']).toBe('all');
+    expect(manager.permissions.recordAccess['dashboard']).toBe('all');
+    expect(rep.permissions.recordAccess['dashboard']).toBe('own');
+    expect(viewer.permissions.recordAccess['dashboard']).toBe('own');
   });
 });

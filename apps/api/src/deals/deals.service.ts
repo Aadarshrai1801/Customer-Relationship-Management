@@ -72,6 +72,7 @@ export interface SerializedDeal {
   status: 'open' | 'won' | 'lost';
   lossReason: string | null;
   closedAt: Date | null;
+  forecastCategory: 'pipeline' | 'best_case' | 'commit';
   customFields: Record<string, unknown>;
   computedFields: Record<string, unknown>;
   createdAt: Date;
@@ -189,6 +190,7 @@ export class DealsService {
           exchangeRate: String(converted.exchangeRate),
           exchangeRateDate: converted.rateDate,
           probability: input.probability ?? null,
+          forecastCategory: input.forecastCategory,
           expectedCloseDate: input.expectedCloseDate ? new Date(input.expectedCloseDate) : null,
           status: stage.isClosedWon ? 'won' : stage.isClosedLost ? 'lost' : 'open',
           lossReason,
@@ -430,6 +432,7 @@ export class DealsService {
         currency: row.deal.currency,
         baseAmount: row.deal.baseAmount,
         probability: row.deal.probability,
+        forecastCategory: row.deal.forecastCategory,
         expectedCloseDate: row.deal.expectedCloseDate,
       };
       const [updated] = await db
@@ -446,6 +449,7 @@ export class DealsService {
           exchangeRate: String(exchangeRate),
           exchangeRateDate,
           probability: patch.probability !== undefined ? patch.probability : row.deal.probability,
+          forecastCategory: patch.forecastCategory ?? row.deal.forecastCategory,
           expectedCloseDate:
             patch.expectedCloseDate !== undefined
               ? patch.expectedCloseDate
@@ -468,6 +472,7 @@ export class DealsService {
         currency: updated.currency,
         baseAmount: updated.baseAmount,
         probability: updated.probability,
+        forecastCategory: updated.forecastCategory,
         expectedCloseDate: updated.expectedCloseDate,
       };
       const { oldValues, newValues } = diffObjects(before, {
@@ -1303,6 +1308,7 @@ export class DealsService {
       status: deal.status,
       lossReason: deal.lossReason,
       closedAt: deal.closedAt,
+      forecastCategory: deal.forecastCategory,
       customFields: this.filterCustom(deal.customFields, auth),
       computedFields: this.filterCustom(computed, auth),
       createdAt: deal.createdAt,
