@@ -17,6 +17,7 @@ import { SsoErrorPage, SsoSuccessPage } from './pages/sso';
 import { HomePage } from './pages/home';
 import { WelcomePage } from './pages/welcome';
 import { BillingPage } from './pages/settings/billing';
+import { WorkflowsPage } from './pages/settings/workflows';
 import { ProfilePage } from './pages/settings/profile';
 import { SecurityPage } from './pages/settings/security';
 import { UsersPage } from './pages/settings/users';
@@ -86,6 +87,12 @@ const billingRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/settings/billing',
   component: BillingPage,
+});
+
+const workflowsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/settings/workflows',
+  component: WorkflowsPage,
 });
 
 // Module 4 Routes
@@ -266,6 +273,7 @@ const routeTree = rootRoute.addChildren([
     homeRoute,
     welcomeRoute,
     billingRoute,
+    workflowsRoute,
     dealsRoute,
     dealDetailRoute,
     tasksRoute,

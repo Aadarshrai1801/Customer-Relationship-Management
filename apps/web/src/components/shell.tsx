@@ -22,6 +22,7 @@ const NAV: Array<{ to: string; label: string; scope?: string }> = [
   { to: '/settings/users', label: 'Users', scope: 'users:read' },
   { to: '/settings/roles', label: 'Roles', scope: 'roles:read' },
   { to: '/settings/billing', label: 'Billing', scope: 'org:manage' },
+  { to: '/settings/workflows', label: 'Workflows', scope: 'workflows:read' },
   { to: '/settings/audit', label: 'Audit log', scope: 'audit:read' },
   { to: '/settings/profile', label: 'Settings' },
 ];
