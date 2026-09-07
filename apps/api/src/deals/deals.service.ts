@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import {
   accounts,
   contactNotes,
@@ -17,6 +17,7 @@ import {
   organizations,
   pipelineStages,
   pipelines,
+  products,
   users,
   type Deal,
   type PipelineStage,
@@ -33,7 +34,12 @@ import {
 import { checkRecordAccess, fieldRule, filterReadableFields, hasScope } from '../rbac/permissions';
 import { PipelinesService } from '../pipelines/pipelines.service';
 import { convertToBaseCurrency, resolveBaseCurrency } from '../pipelines/currency';
-import type { CreateDealInput, ListDealsQuery, UpdateDealInput } from './deals.schemas';
+import type {
+  AddLineItemInput,
+  CreateDealInput,
+  ListDealsQuery,
+  UpdateDealInput,
+} from './deals.schemas';
 
 export interface SerializedDeal {
   id: string;
@@ -689,9 +695,8 @@ export class DealsService {
   }
 
   /**
-   * Minimal line-items read surface: enough for the Closed-Won prompt
-   * ("add products?") and the M4-PR6 detail view. Full line-item write
-   * APIs arrive with the quoting pass, not this module.
+   * Line-items read surface for the Closed-Won prompt and the deal detail
+   * view. Writes live here too (add/remove); quote documents stay P1.
    */
   async lineItems(
     auth: AuthContext,
@@ -703,7 +708,126 @@ export class DealsService {
       return db
         .select()
         .from(dealLineItems)
-        .where(and(eq(dealLineItems.dealId, row.deal.id), eq(dealLineItems.orgId, auth.org.id)));
+        .where(and(eq(dealLineItems.dealId, row.deal.id), eq(dealLineItems.orgId, auth.org.id)))
+        .orderBy(asc(dealLineItems.createdAt), asc(dealLineItems.id));
+    });
+  }
+
+  /**
+   * Attaches a line item to a deal. Snapshots product name/price/tax/currency
+   * so later catalog edits never rewrite history. Amounts are stored in the
+   * resolved line currency with no FX conversion — a stated assumption;
+   * multi-currency reporting converts at the deal level (baseAmount).
+   */
+  async addLineItem(
+    auth: AuthContext,
+    dealId: string,
+    input: AddLineItemInput,
+  ): Promise<{ lineItem: typeof dealLineItems.$inferSelect }> {
+    return this.tenantDb.tx(auth.org.id, async (db) => {
+      const row = await this.requireLiveDeal(db, auth.org.id, dealId);
+      this.assertDealReadable(auth, row.deal.ownerId);
+
+      let product: typeof products.$inferSelect | null = null;
+      if (input.productId) {
+        const [found] = await db
+          .select()
+          .from(products)
+          .where(and(eq(products.id, input.productId), eq(products.orgId, auth.org.id)));
+        if (!found) {
+          throw new NotFoundException({
+            message: 'Product not found',
+            code: 'PRODUCT_NOT_FOUND',
+          });
+        }
+        product = found;
+      }
+
+      const name = input.name ?? product?.name;
+      if (!name) {
+        validationFailed([
+          { path: 'name', message: 'Name is required when no productId is given' },
+        ]);
+      }
+      const unitPrice =
+        input.unitPrice ?? (product ? toNumber(product.unitPrice, 'unitPrice') : undefined);
+      if (unitPrice === undefined) {
+        validationFailed([
+          { path: 'unitPrice', message: 'Unit price is required when no productId is given' },
+        ]);
+      }
+      const taxRate = input.taxRate ?? (product ? toNumber(product.taxRate, 'taxRate') : 0);
+      const currency = input.currency ?? product?.currency ?? row.deal.currency;
+      const lineTotal =
+        Math.round(
+          input.quantity * (unitPrice as number) * (1 - input.discountRate) * (1 + taxRate) * 100,
+        ) / 100;
+
+      const [created] = await db
+        .insert(dealLineItems)
+        .values({
+          orgId: auth.org.id,
+          dealId: row.deal.id,
+          productId: product?.id ?? null,
+          name,
+          quantity: String(input.quantity),
+          unitPrice: String(unitPrice),
+          discountRate: String(input.discountRate),
+          taxRate: String(taxRate),
+          lineTotal: String(lineTotal),
+          currency,
+        })
+        .returning();
+      if (!created) throw new Error('Line item insert returned no row');
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: 'deal.line_item_added',
+        entityType: 'deal',
+        entityId: row.deal.id,
+        newValues: {
+          lineItemId: created.id,
+          name: created.name,
+          quantity: created.quantity,
+          lineTotal: created.lineTotal,
+        },
+      });
+      return { lineItem: created };
+    });
+  }
+
+  async removeLineItem(auth: AuthContext, dealId: string, lineId: string): Promise<{ ok: true }> {
+    return this.tenantDb.tx(auth.org.id, async (db) => {
+      const row = await this.requireLiveDeal(db, auth.org.id, dealId);
+      this.assertDealReadable(auth, row.deal.ownerId);
+      const [line] = await db
+        .select()
+        .from(dealLineItems)
+        .where(
+          and(
+            eq(dealLineItems.id, lineId),
+            eq(dealLineItems.dealId, row.deal.id),
+            eq(dealLineItems.orgId, auth.org.id),
+          ),
+        );
+      if (!line) {
+        throw new NotFoundException({
+          message: 'Line item not found',
+          code: 'LINE_ITEM_NOT_FOUND',
+        });
+      }
+      await db.delete(dealLineItems).where(eq(dealLineItems.id, line.id));
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: 'deal.line_item_removed',
+        entityType: 'deal',
+        entityId: row.deal.id,
+        oldValues: { lineItemId: line.id, name: line.name, lineTotal: line.lineTotal },
+      });
+      return { ok: true as const };
     });
   }
 

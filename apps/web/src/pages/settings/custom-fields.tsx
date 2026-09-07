@@ -23,7 +23,7 @@ export function CustomFieldsAdminPage(): React.JSX.Element {
   const { notify } = useToast();
   const queryClient = useQueryClient();
 
-  const [entityType, setEntityType] = useState<'contact' | 'account' | 'lead'>('contact');
+  const [entityType, setEntityType] = useState<'contact' | 'account' | 'lead' | 'deal'>('contact');
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<CustomFieldDef | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CustomFieldDef | null>(null);
@@ -224,11 +224,22 @@ export function CustomFieldsAdminPage(): React.JSX.Element {
         >
           Lead Custom Fields
         </button>
+        <button
+          type="button"
+          onClick={() => setEntityType('deal')}
+          className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+            entityType === 'deal'
+              ? 'bg-accent text-white'
+              : 'text-text-secondary hover:bg-surface-raised hover:text-text-primary'
+          }`}
+        >
+          Deal Custom Fields
+        </button>
       </div>
 
       {/* Fields List */}
       <Card
-        title={`${entityType === 'contact' ? 'Contact' : entityType === 'account' ? 'Account' : 'Lead'} Field Definitions`}
+        title={`${entityType === 'contact' ? 'Contact' : entityType === 'account' ? 'Account' : entityType === 'lead' ? 'Lead' : 'Deal'} Field Definitions`}
         description="These fields are validated and rendered across list and detail pages."
       >
         {fieldsQuery.isLoading ? (
@@ -281,14 +292,15 @@ export function CustomFieldsAdminPage(): React.JSX.Element {
                       <td className="py-2.5 font-semibold text-text-primary">{def.label}</td>
                       <td className="py-2.5 font-mono text-text-secondary">{def.key}</td>
                       <td className="py-2.5">
-                        <Badge tone={def.type === 'formula' ? 'info' : 'neutral'}>
-                          {def.type}
-                        </Badge>
+                        <Badge tone={def.type === 'formula' ? 'info' : 'neutral'}>{def.type}</Badge>
                       </td>
                       <td className="py-2.5 text-text-secondary">
                         {def.required ? 'Yes (Mandatory)' : 'No'}
                       </td>
-                      <td className="py-2.5 text-text-secondary max-w-[250px] truncate" title={configDisplay}>
+                      <td
+                        className="py-2.5 text-text-secondary max-w-[250px] truncate"
+                        title={configDisplay}
+                      >
                         {configDisplay}
                       </td>
                       <td className="py-2.5 text-right">
@@ -340,10 +352,7 @@ export function CustomFieldsAdminPage(): React.JSX.Element {
               setFormError('Label is required');
               return;
             }
-            if (
-              (type === 'picklist' || type === 'multi_select') &&
-              !optionsInput.trim()
-            ) {
+            if ((type === 'picklist' || type === 'multi_select') && !optionsInput.trim()) {
               setFormError('Picklist and Multi-select require comma-separated options');
               return;
             }
@@ -467,18 +476,14 @@ export function CustomFieldsAdminPage(): React.JSX.Element {
               <div className="text-[11px] text-text-secondary">
                 <span className="font-semibold text-text-primary">Supported Functions:</span>{' '}
                 <code>CONCAT(a, b, ...)</code>, <code>ROUND(x, dec)</code>,{' '}
-                <code>IF(cond, a, b)</code>, <code>MIN(a, b)</code>, <code>MAX(a, b)</code>.{' '}
-                Field references must be in braces: <code>&#123;field_key&#125;</code>.
+                <code>IF(cond, a, b)</code>, <code>MIN(a, b)</code>, <code>MAX(a, b)</code>. Field
+                references must be in braces: <code>&#123;field_key&#125;</code>.
               </div>
             </div>
           )}
 
           <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setCreateModalOpen(false)}
-            >
+            <Button type="button" variant="secondary" onClick={() => setCreateModalOpen(false)}>
               Cancel
             </Button>
             <Button type="submit" variant="primary" disabled={createMutation.isPending}>
@@ -527,10 +532,7 @@ export function CustomFieldsAdminPage(): React.JSX.Element {
           )}
 
           {(editTarget?.type === 'picklist' || editTarget?.type === 'multi_select') && (
-            <Field
-              label="Options (comma-separated)"
-              htmlFor="edit-cf-options"
-            >
+            <Field label="Options (comma-separated)" htmlFor="edit-cf-options">
               <Input
                 id="edit-cf-options"
                 value={editOptionsInput}
@@ -550,11 +552,7 @@ export function CustomFieldsAdminPage(): React.JSX.Element {
           )}
 
           <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setEditTarget(null)}
-            >
+            <Button type="button" variant="secondary" onClick={() => setEditTarget(null)}>
               Cancel
             </Button>
             <Button type="submit" variant="primary" disabled={updateMutation.isPending}>

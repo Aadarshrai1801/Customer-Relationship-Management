@@ -101,13 +101,40 @@ const DEAL = {
   updatedAt: new Date().toISOString(),
 };
 
-function setupApi(overrides?: { lineItems?: unknown[]; onDelete?: () => void }) {
+function setupApi(overrides?: {
+  lineItems?: unknown[];
+  products?: unknown[];
+  onDelete?: () => void;
+}) {
   mockApi.mockImplementation((url: string, init?: { method?: string }) => {
     if (url === '/deals/deal-1' && init?.method === 'DELETE') {
       overrides?.onDelete?.();
       return Promise.resolve({ ok: true });
     }
+    if (url === '/deals/deal-1' && init?.method === 'PATCH') {
+      const body = (init as { body?: Record<string, unknown> }).body ?? {};
+      return Promise.resolve({ deal: { ...DEAL, ...body } });
+    }
     if (url === '/deals/deal-1') return Promise.resolve({ ...DEAL });
+    if (url === '/deals/deal-1/line-items' && init?.method === 'POST') {
+      const body = (init as { body?: Record<string, unknown> }).body as Record<string, unknown>;
+      return Promise.resolve({
+        lineItem: {
+          id: 'line-new',
+          name: 'Catalog Widget',
+          productId: 'prod-1',
+          quantity: String(body['quantity'] ?? '1'),
+          unitPrice: '100',
+          discountRate: String(body['discountRate'] ?? 0),
+          taxRate: String(body['taxRate'] ?? 0),
+          lineTotal: '200',
+          currency: 'USD',
+        },
+      });
+    }
+    if (url.startsWith('/deals/deal-1/line-items/') && init?.method === 'DELETE') {
+      return Promise.resolve({ ok: true });
+    }
     if (url === '/deals/deal-1/history') {
       return Promise.resolve([
         {
@@ -121,6 +148,21 @@ function setupApi(overrides?: { lineItems?: unknown[]; onDelete?: () => void }) 
       ]);
     }
     if (url === '/deals/deal-1/line-items') return Promise.resolve(overrides?.lineItems ?? []);
+    if (url === '/products') {
+      return Promise.resolve(
+        overrides?.products ?? [
+          {
+            id: 'prod-1',
+            name: 'Catalog Widget',
+            sku: 'W-1',
+            unitPrice: '100',
+            currency: 'USD',
+            taxRate: '0',
+            isActive: true,
+          },
+        ],
+      );
+    }
     if (url === '/pipelines') {
       return Promise.resolve([
         {
@@ -274,5 +316,57 @@ describe('DealDetailPage', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Delete deal' }));
 
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith({ to: '/deals' }));
+  });
+
+  it('adds a catalog line item through the form', async () => {
+    const user = userEvent.setup();
+    renderDetail();
+    await screen.findByRole('heading', { name: 'Acme Expansion' });
+    await screen.findByText('No products attached.');
+
+    const productSelect = screen.getByLabelText('Product') as HTMLSelectElement;
+    await user.selectOptions(productSelect, 'prod-1');
+    await user.click(screen.getByRole('button', { name: 'Add line item' }));
+
+    await waitFor(() =>
+      expect(mockApi).toHaveBeenCalledWith(
+        '/deals/deal-1/line-items',
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.objectContaining({ productId: 'prod-1', quantity: 1 }),
+        }),
+      ),
+    );
+  });
+
+  it('removes an existing line item', async () => {
+    const user = userEvent.setup();
+    setupApi({
+      lineItems: [
+        {
+          id: 'line-1',
+          name: 'Catalog Widget',
+          productId: 'prod-1',
+          quantity: '2',
+          unitPrice: '100',
+          discountRate: '0',
+          taxRate: '0',
+          lineTotal: '200',
+          currency: 'USD',
+        },
+      ],
+    });
+    renderDetail();
+    await screen.findByRole('heading', { name: 'Acme Expansion' });
+    await screen.findByText('Catalog Widget');
+
+    await user.click(screen.getByRole('button', { name: 'Remove Catalog Widget' }));
+
+    await waitFor(() =>
+      expect(mockApi).toHaveBeenCalledWith(
+        '/deals/deal-1/line-items/line-1',
+        expect.objectContaining({ method: 'DELETE' }),
+      ),
+    );
   });
 });

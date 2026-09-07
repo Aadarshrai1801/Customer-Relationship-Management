@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, hasScope, type DirectoryUser } from '../../lib/api';
 import { useAuth } from '../../lib/providers';
 import type {
+  CatalogProduct,
   CustomFieldDef,
   DealLineItem,
   PipelineWithStages,
@@ -89,8 +90,8 @@ export function DealDetailPage(): React.JSX.Element {
 
   const updateMutation = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
-      api<SerializedDeal>(`/deals/${id}`, { method: 'PATCH', body }),
-    onSuccess: (updated) => {
+      api<{ deal: SerializedDeal }>(`/deals/${id}`, { method: 'PATCH', body }),
+    onSuccess: ({ deal: updated }) => {
       queryClient.setQueryData(['deal', id], updated);
       refresh();
       notify('success', 'Deal updated');
@@ -119,6 +120,7 @@ export function DealDetailPage(): React.JSX.Element {
   const deleteMutation = useMutation({
     mutationFn: () => api(`/deals/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
+      refresh();
       notify('success', 'Deal deleted');
       void navigate({ to: '/deals' });
     },
@@ -454,27 +456,16 @@ export function DealDetailPage(): React.JSX.Element {
             title="Products & line items"
             description={
               lineItems.length === 0
-                ? 'None yet — full quoting arrives in a later pass.'
+                ? 'None yet — add the first line below.'
                 : `${lineItems.length} line item${lineItems.length === 1 ? '' : 's'}`
             }
           >
-            {lineItems.length === 0 ? (
-              <p className="text-xs italic text-text-secondary">No products attached.</p>
-            ) : (
-              <ul className="flex flex-col gap-2 text-xs">
-                {lineItems.map((item) => (
-                  <li
-                    key={item.id}
-                    className="flex justify-between gap-2 rounded border border-border px-3 py-2"
-                  >
-                    <span className="font-medium">{item.name}</span>
-                    <span className="text-text-secondary">
-                      {item.quantity} × {money(Number(item.unitPrice), item.currency)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <LineItemsCard
+              dealId={deal.id}
+              dealCurrency={deal.currency}
+              items={lineItems}
+              canManage={canManage}
+            />
           </Card>
         </div>
       </div>
@@ -533,7 +524,7 @@ export function DealDetailPage(): React.JSX.Element {
         title="Close as won"
         description={
           lineItems.length === 0
-            ? 'This deal has no products or line items yet. You can proceed — this does not block the move.'
+            ? 'This deal has no products or line items yet. Add them in “Products & line items” below, or proceed — this does not block the move.'
             : 'Confirm closing this deal as won.'
         }
       >
@@ -588,4 +579,247 @@ function formatDuration(totalSeconds: number): string {
   if (totalSeconds < 3600) return `${Math.floor(totalSeconds / 60)}m`;
   if (totalSeconds < 86400) return `${Math.floor(totalSeconds / 3600)}h`;
   return `${Math.floor(totalSeconds / 86400)}d`;
+}
+
+function LineItemsCard({
+  dealId,
+  dealCurrency,
+  items,
+  canManage,
+}: {
+  dealId: string;
+  dealCurrency: string;
+  items: DealLineItem[];
+  canManage: boolean;
+}): React.JSX.Element {
+  const { notify } = useToast();
+  const queryClient = useQueryClient();
+  const [mode, setMode] = useState<'catalog' | 'custom'>('catalog');
+  const [productId, setProductId] = useState('');
+  const [customName, setCustomName] = useState('');
+  const [customPrice, setCustomPrice] = useState('');
+  const [quantity, setQuantity] = useState('1');
+  const [discountPct, setDiscountPct] = useState('0');
+  const [taxPct, setTaxPct] = useState('0');
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const productsQuery = useQuery({
+    queryKey: ['products-catalog'],
+    queryFn: () => api<CatalogProduct[]>('/products'),
+  });
+  const catalog = (productsQuery.data ?? []).filter((p) => p.isActive);
+
+  async function refreshItems(): Promise<void> {
+    await queryClient.invalidateQueries({ queryKey: ['deal-line-items', dealId] });
+  }
+
+  const addMutation = useMutation({
+    mutationFn: async () => {
+      const qty = Number(quantity);
+      if (!Number.isFinite(qty) || qty <= 0) throw new Error('Quantity must be greater than 0');
+      const discount = Number(discountPct) || 0;
+      const tax = Number(taxPct) || 0;
+      if (discount < 0 || discount > 100) throw new Error('Discount must be between 0 and 100%');
+      if (tax < 0 || tax > 100) throw new Error('Tax must be between 0 and 100%');
+
+      let resolvedProductId: string | undefined;
+      const body: Record<string, unknown> = {
+        quantity: qty,
+        discountRate: discount / 100,
+        taxRate: tax / 100,
+      };
+      if (mode === 'catalog') {
+        if (!productId) throw new Error('Choose a catalog product first');
+        resolvedProductId = productId;
+        body['productId'] = productId;
+      } else {
+        if (!customName.trim()) throw new Error('Line name is required');
+        const price = Number(customPrice);
+        if (!Number.isFinite(price) || price < 0) throw new Error('Unit price must be 0 or more');
+        body['name'] = customName.trim();
+        body['unitPrice'] = price;
+        body['currency'] = dealCurrency;
+      }
+      return api<{ lineItem: DealLineItem }>(`/deals/${dealId}/line-items`, {
+        method: 'POST',
+        body,
+      }).then((result) => ({ result, resolvedProductId }));
+    },
+    onSuccess: () => {
+      setProductId('');
+      setCustomName('');
+      setCustomPrice('');
+      setQuantity('1');
+      setDiscountPct('0');
+      setTaxPct('0');
+      setFormError(null);
+      void refreshItems();
+      notify('success', 'Line item added');
+    },
+    onError: (err: Error) => {
+      setFormError(err.message || 'Failed to add line item');
+    },
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (lineId: string) =>
+      api(`/deals/${dealId}/line-items/${lineId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void refreshItems();
+      notify('success', 'Line item removed');
+    },
+    onError: (err: Error) => {
+      notify('error', err.message || 'Failed to remove line item');
+    },
+  });
+
+  const total = items.reduce((sum, item) => sum + Number(item.lineTotal || 0), 0);
+  const currency = items[0]?.currency ?? dealCurrency;
+
+  return (
+    <div className="flex flex-col gap-3">
+      {items.length === 0 ? (
+        <p className="text-xs italic text-text-secondary">No products attached.</p>
+      ) : (
+        <>
+          <ul className="flex flex-col gap-2 text-xs">
+            {items.map((item) => (
+              <li
+                key={item.id}
+                className="flex items-center justify-between gap-2 rounded border border-border px-3 py-2"
+              >
+                <span className="font-medium">{item.name}</span>
+                <span className="flex items-center gap-2 text-text-secondary">
+                  <span>
+                    {item.quantity} × {money(Number(item.unitPrice), item.currency)}
+                    {Number(item.discountRate) > 0 &&
+                      ` (−${Math.round(Number(item.discountRate) * 100)}%)`}
+                    {` = ${money(Number(item.lineTotal), item.currency)}`}
+                  </span>
+                  {canManage && (
+                    <button
+                      type="button"
+                      onClick={() => removeMutation.mutate(item.id)}
+                      className="rounded px-1.5 py-0.5 text-danger hover:bg-danger-soft"
+                      aria-label={`Remove ${item.name}`}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-right text-xs font-semibold">
+            Total: {money(Math.round(total * 100) / 100, currency)}
+          </p>
+        </>
+      )}
+
+      {canManage && (
+        <form
+          className="flex flex-col gap-2 rounded border border-dashed border-border p-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            addMutation.mutate();
+          }}
+        >
+          <div className="flex gap-2 text-xs" role="group" aria-label="Line item source">
+            <button
+              type="button"
+              onClick={() => setMode('catalog')}
+              aria-pressed={mode === 'catalog'}
+              className={`rounded px-2 py-1 font-semibold ${mode === 'catalog' ? 'bg-accent text-white' : 'bg-surface-raised'}`}
+            >
+              Catalog product
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('custom')}
+              aria-pressed={mode === 'custom'}
+              className={`rounded px-2 py-1 font-semibold ${mode === 'custom' ? 'bg-accent text-white' : 'bg-surface-raised'}`}
+            >
+              Custom line
+            </button>
+          </div>
+
+          {mode === 'catalog' ? (
+            <Field label="Product" htmlFor="line-product">
+              <select
+                id="line-product"
+                value={productId}
+                onChange={(e) => setProductId(e.target.value)}
+                className="h-9 rounded border border-border bg-surface px-2 text-xs"
+              >
+                <option value="">Select a product…</option>
+                {catalog.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {money(Number(p.unitPrice), p.currency)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Line name" htmlFor="line-name">
+                <Input
+                  id="line-name"
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  placeholder="Onboarding package"
+                />
+              </Field>
+              <Field label={`Unit price (${dealCurrency})`} htmlFor="line-price">
+                <Input
+                  id="line-price"
+                  inputMode="decimal"
+                  value={customPrice}
+                  onChange={(e) => setCustomPrice(e.target.value)}
+                  placeholder="750"
+                />
+              </Field>
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-2">
+            <Field label="Qty" htmlFor="line-qty">
+              <Input
+                id="line-qty"
+                inputMode="decimal"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+              />
+            </Field>
+            <Field label="Discount %" htmlFor="line-discount">
+              <Input
+                id="line-discount"
+                inputMode="decimal"
+                value={discountPct}
+                onChange={(e) => setDiscountPct(e.target.value)}
+              />
+            </Field>
+            <Field label="Tax %" htmlFor="line-tax">
+              <Input
+                id="line-tax"
+                inputMode="decimal"
+                value={taxPct}
+                onChange={(e) => setTaxPct(e.target.value)}
+              />
+            </Field>
+          </div>
+
+          {formError && (
+            <div role="alert" className="rounded bg-danger-soft p-2 text-xs text-danger">
+              {formError}
+            </div>
+          )}
+          <div className="flex justify-end">
+            <Button type="submit" variant="secondary" disabled={addMutation.isPending}>
+              {addMutation.isPending ? 'Adding…' : 'Add line item'}
+            </Button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
 }

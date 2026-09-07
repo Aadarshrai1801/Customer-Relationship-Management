@@ -53,6 +53,19 @@ export const listDealsQuerySchema = z
   })
   .strict();
 
+export const addLineItemSchema = z
+  .object({
+    productId: z.string().uuid().optional(),
+    name: z.string().trim().min(1).max(200).optional(),
+    quantity: z.number().finite().positive().max(999999999),
+    unitPrice: z.number().finite().min(0).max(9999999999999.99).optional(),
+    discountRate: z.number().finite().min(0).max(1).default(0),
+    taxRate: z.number().finite().min(0).max(1).optional(),
+    currency: isoCurrency.optional(),
+  })
+  .strict();
+
 export type CreateDealInput = z.infer<typeof createDealSchema>;
 export type UpdateDealInput = z.infer<typeof updateDealSchema>;
 export type ListDealsQuery = z.infer<typeof listDealsQuerySchema>;
+export type AddLineItemInput = z.infer<typeof addLineItemSchema>;

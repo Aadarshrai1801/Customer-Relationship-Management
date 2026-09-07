@@ -18,7 +18,9 @@ import { DealsService } from './deals.service';
 import {
   createDealSchema,
   listDealsQuerySchema,
+  addLineItemSchema,
   updateDealSchema,
+  type AddLineItemInput,
   type CreateDealInput,
   type ListDealsQuery,
   type UpdateDealInput,
@@ -99,6 +101,26 @@ export class DealsController {
   @Get(':id/line-items')
   async lineItems(@Req() req: Request, @Param('id') id: string): Promise<unknown> {
     return this.deals.lineItems(authOf(req), id);
+  }
+
+  @RequireScopes('deals:manage')
+  @Post(':id/line-items')
+  async addLineItem(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(addLineItemSchema)) body: unknown,
+  ): Promise<unknown> {
+    return this.deals.addLineItem(authOf(req), id, body as AddLineItemInput);
+  }
+
+  @RequireScopes('deals:manage')
+  @Delete(':id/line-items/:lineId')
+  async removeLineItem(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Param('lineId') lineId: string,
+  ): Promise<unknown> {
+    return this.deals.removeLineItem(authOf(req), id, lineId);
   }
 
   @RequireScopes('deals:read')

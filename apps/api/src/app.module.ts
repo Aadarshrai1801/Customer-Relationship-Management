@@ -18,6 +18,7 @@ import { ImportsModule } from './imports/imports.module';
 import { LeadsModule } from './leads/leads.module';
 import { PipelinesModule } from './pipelines/pipelines.module';
 import { DealsModule } from './deals/deals.module';
+import { ProductsModule } from './products/products.module';
 import { LeadRoutingModule } from './lead-routing/lead-routing.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { WebToLeadModule } from './web-to-lead/web-to-lead.module';
@@ -44,6 +45,7 @@ import { HealthController } from './health/health.controller';
     LeadsModule,
     PipelinesModule,
     DealsModule,
+    ProductsModule,
     LeadRoutingModule,
     NotificationsModule,
     WebToLeadModule,

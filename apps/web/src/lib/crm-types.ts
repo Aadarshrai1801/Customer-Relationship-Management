@@ -228,9 +228,23 @@ export interface ForecastResponse {
 export interface DealLineItem {
   id: string;
   name: string;
+  productId: string | null;
   quantity: string;
   unitPrice: string;
+  discountRate: string;
+  taxRate: string;
+  lineTotal: string;
   currency: string;
+}
+
+export interface CatalogProduct {
+  id: string;
+  name: string;
+  sku: string | null;
+  unitPrice: string;
+  currency: string;
+  taxRate: string;
+  isActive: boolean;
 }
 
 export type LeadStatus = 'new' | 'contacted' | 'qualified' | 'unqualified' | 'converted';
