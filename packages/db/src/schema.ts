@@ -23,6 +23,8 @@ export interface OrganizationSettings {
   /** Module 8 (PRD 4.13): per-file upload cap; org-wide attachment bytes cap. */
   maxAttachmentBytes?: number;
   attachmentStorageCapBytes?: number;
+  /** Module 12 (PRD 4.3 P1): rot threshold in days (default 14). */
+  staleDealDays?: number;
 }
 
 export interface OrganizationSecuritySettings {
@@ -310,6 +312,27 @@ export type NewInvoice = typeof invoices.$inferInsert;
 export type Workflow = typeof workflows.$inferSelect;
 export type NewWorkflow = typeof workflows.$inferInsert;
 export type WorkflowRun = typeof workflowRuns.$inferSelect;
+export type Competitor = typeof competitors.$inferSelect;
+export type NewCompetitor = typeof competitors.$inferInsert;
+
+/**
+ * Module 12 (PRD 4.3 P1): named-competitor catalog so win/loss reporting
+ * stays consistent instead of free-text soup. Linked from deals.
+ */
+export const competitors = pgTable(
+  'competitors',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uq_competitors_org_name').on(t.orgId, t.name)],
+);
 
 /**
  * Module 11 (PRD 4.9): automation rules (trigger → conditions → actions).
@@ -963,6 +986,9 @@ export const deals = pgTable(
     status: text('status').$type<'open' | 'won' | 'lost'>().notNull().default('open'),
     lossReason: text('loss_reason'),
     closedAt: timestamp('closed_at', { withTimezone: true }),
+    competitorId: uuid('competitor_id').references(() => competitors.id, {
+      onDelete: 'set null',
+    }),
     // Module 7 (PRD 4.8): forecast rollup bucket — pipeline | best_case | commit.
     forecastCategory: text('forecast_category')
       .$type<'pipeline' | 'best_case' | 'commit'>()
@@ -1091,6 +1117,9 @@ export const tasks = pgTable(
     remindAt: timestamp('remind_at', { withTimezone: true }),
     reminderSentAt: timestamp('reminder_sent_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    // Module 12 (PRD 4.4 P1): { frequency: daily|weekly|monthly, interval?: n }.
+    // Occurrences are independent copies spawned on completion.
+    recurrence: jsonb('recurrence').$type<Record<string, unknown>>(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
