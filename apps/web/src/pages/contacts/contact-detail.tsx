@@ -17,6 +17,8 @@ import { InlineEdit } from '../../components/inline-edit';
 import { CustomFieldsRenderer } from '../../components/custom-fields-renderer';
 import { MergePickerModal } from '../../components/merge-picker-modal';
 import { Modal } from '../../components/modal';
+import { CommentsThread } from '../../components/comments-thread';
+import { AttachmentsCard } from '../../components/attachments-card';
 import { useToast } from '../../components/toast';
 
 const STAGE_OPTIONS = [
@@ -47,7 +49,8 @@ export function ContactDetailPage(): React.JSX.Element {
   const [candidateSelectOpen, setCandidateSelectOpen] = useState(false);
 
   const canManage = hasScope(user, 'contacts:manage');
-  const userFieldRules = (user?.role.permissions?.fields as Record<string, 'edit' | 'read' | 'none'>) ?? {};
+  const userFieldRules =
+    (user?.role.permissions?.fields as Record<string, 'edit' | 'read' | 'none'>) ?? {};
 
   // Fetch contact record
   const contactQuery = useQuery({
@@ -71,7 +74,10 @@ export function ContactDetailPage(): React.JSX.Element {
   // Fetch contact timeline
   const timelineQuery = useQuery({
     queryKey: ['contact-timeline', id],
-    queryFn: () => api<{ items: TimelineItem[]; nextCursor: string | null }>(`/contacts/${id}/timeline?limit=50`),
+    queryFn: () =>
+      api<{ items: TimelineItem[]; nextCursor: string | null }>(
+        `/contacts/${id}/timeline?limit=50`,
+      ),
     enabled: Boolean(id),
   });
 
@@ -223,12 +229,7 @@ export function ContactDetailPage(): React.JSX.Element {
   return (
     <div className="flex flex-col gap-6">
       {/* Breadcrumbs */}
-      <Breadcrumbs
-        items={[
-          { label: 'Contacts', to: '/contacts' },
-          { label: contact.name },
-        ]}
-      />
+      <Breadcrumbs items={[{ label: 'Contacts', to: '/contacts' }, { label: contact.name }]} />
 
       {/* Header Banner */}
       <div className="flex flex-wrap items-start justify-between gap-4 rounded-xl border border-border bg-surface p-6 shadow-subtle">
@@ -518,11 +519,14 @@ export function ContactDetailPage(): React.JSX.Element {
                         </span>
                       </div>
                       {item.actor.email && (
-                        <p className="mt-1 text-[11px] text-text-secondary">By: {item.actor.email}</p>
+                        <p className="mt-1 text-[11px] text-text-secondary">
+                          By: {item.actor.email}
+                        </p>
                       )}
                       {item.data && Object.keys(item.data).length > 0 && (
                         <div className="mt-1.5 rounded bg-surface-raised/60 p-2 text-[11px] font-mono text-text-secondary">
-                          {item.type === 'note_added' && typeof item.data['preview'] === 'string' ? (
+                          {item.type === 'note_added' &&
+                          typeof item.data['preview'] === 'string' ? (
                             <p className="font-sans text-text-primary">{item.data['preview']}</p>
                           ) : (
                             <pre className="overflow-x-auto whitespace-pre-wrap">
@@ -641,6 +645,11 @@ export function ContactDetailPage(): React.JSX.Element {
         </div>
       </div>
 
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <CommentsThread entityType="contact" entityId={contact.id} />
+        <AttachmentsCard entityType="contact" entityId={contact.id} />
+      </div>
+
       {/* Select Merge Candidate Modal */}
       <Modal
         open={candidateSelectOpen}
@@ -671,11 +680,7 @@ export function ContactDetailPage(): React.JSX.Element {
           </select>
 
           <div className="flex items-center justify-end gap-2 border-t border-border pt-3">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setCandidateSelectOpen(false)}
-            >
+            <Button type="button" variant="secondary" onClick={() => setCandidateSelectOpen(false)}>
               Cancel
             </Button>
             <Button
@@ -726,7 +731,8 @@ export function ContactDetailPage(): React.JSX.Element {
       >
         <div className="flex flex-col gap-3">
           <p className="text-xs text-text-secondary">
-            This will soft-delete the contact. Timeline activity and notes will be preserved in audit logs.
+            This will soft-delete the contact. Timeline activity and notes will be preserved in
+            audit logs.
           </p>
           <div className="flex items-center justify-end gap-2 border-t border-border pt-3">
             <Button

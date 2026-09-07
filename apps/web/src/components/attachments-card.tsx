@@ -160,7 +160,9 @@ export function AttachmentsCard({
               dragging ? 'border-accent bg-accent-soft' : 'border-border text-text-secondary'
             }`}
           >
-            <span>{uploadMutation.isPending ? 'Uploading…' : 'Drop files here or click to browse'}</span>
+            <span>
+              {uploadMutation.isPending ? 'Uploading…' : 'Drop files here or click to browse'}
+            </span>
             <span>PDF, images, docs, zips · default 25MB per file</span>
           </div>
           <input

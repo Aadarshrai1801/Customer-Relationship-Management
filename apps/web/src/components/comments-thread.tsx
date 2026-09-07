@@ -30,12 +30,15 @@ export function CommentsThread({
 
   const commentsQuery = useQuery({
     queryKey,
-    queryFn: () =>
-      api<CommentsResponse>(`/comments?entityType=${entityType}&entityId=${entityId}`),
+    queryFn: () => api<CommentsResponse>(`/comments?entityType=${entityType}&entityId=${entityId}`),
   });
 
   function refresh(): void {
     void queryClient.invalidateQueries({ queryKey });
+    // Contact comments feed the Activity Timeline tab on contact detail.
+    if (entityType === 'contact') {
+      void queryClient.invalidateQueries({ queryKey: ['contact-timeline', entityId] });
+    }
   }
 
   const createMutation = useMutation({
@@ -79,10 +82,7 @@ export function CommentsThread({
   const canModerate = hasScope(user, 'users:manage');
 
   return (
-    <Card
-      title="Comments"
-      description="Discuss with your team. Type @email to notify a teammate."
-    >
+    <Card title="Comments" description="Discuss with your team. Type @email to notify a teammate.">
       {commentsQuery.isLoading ? (
         <Skeleton className="h-24 w-full" />
       ) : comments.length === 0 ? (
@@ -134,7 +134,8 @@ export function CommentsThread({
                     className="flex flex-col gap-1"
                     onSubmit={(e) => {
                       e.preventDefault();
-                      if (editDraft.trim()) updateMutation.mutate({ id: comment.id, body: editDraft.trim() });
+                      if (editDraft.trim())
+                        updateMutation.mutate({ id: comment.id, body: editDraft.trim() });
                     }}
                   >
                     <textarea
