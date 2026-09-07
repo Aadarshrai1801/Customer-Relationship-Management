@@ -255,6 +255,11 @@ export function TasksPage(): React.JSX.Element {
                     {activity.type}
                   </Badge>{' '}
                   <span className="font-medium">{activity.subject ?? '(no subject)'}</span>
+                  {typeof activity.durationSeconds === 'number' && activity.durationSeconds > 0 && (
+                    <span className="ml-2 text-text-secondary">
+                      {Math.round(activity.durationSeconds / 60)}m
+                    </span>
+                  )}
                   {activity.conflictFlag && (
                     <span className="ml-2 font-semibold text-warning">sync conflict</span>
                   )}
@@ -403,18 +408,23 @@ function LogActivityForm({ onLogged }: { onLogged: () => void }): React.JSX.Elem
   const { notify } = useToast();
   const [type, setType] = useState('call');
   const [subject, setSubject] = useState('');
+  const [minutes, setMinutes] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const logMutation = useMutation({
     mutationFn: async () => {
       if (!subject.trim()) throw new Error('Subject is required');
-      return api('/activities', {
-        method: 'POST',
-        body: { type, subject: subject.trim() },
-      });
+      const body: Record<string, unknown> = { type, subject: subject.trim() };
+      if (type === 'call' && minutes.trim()) {
+        const parsed = Number(minutes);
+        if (!Number.isFinite(parsed) || parsed < 0) throw new Error('Minutes must be 0 or more');
+        body['durationSeconds'] = Math.round(parsed * 60);
+      }
+      return api('/activities', { method: 'POST', body });
     },
     onSuccess: () => {
       setSubject('');
+      setMinutes('');
       setError(null);
       onLogged();
       notify('success', 'Activity logged');
@@ -430,7 +440,7 @@ function LogActivityForm({ onLogged }: { onLogged: () => void }): React.JSX.Elem
         logMutation.mutate();
       }}
     >
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[140px_1fr_auto]">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[140px_1fr_110px_auto]">
         <label className="flex flex-col gap-1 text-xs font-medium text-text-secondary">
           Type
           <select
@@ -450,6 +460,15 @@ function LogActivityForm({ onLogged }: { onLogged: () => void }): React.JSX.Elem
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
             placeholder="Discovery call with Acme"
+          />
+        </Field>
+        <Field label="Minutes" htmlFor="log-activity-minutes">
+          <Input
+            id="log-activity-minutes"
+            inputMode="decimal"
+            value={minutes}
+            onChange={(e) => setMinutes(e.target.value)}
+            placeholder="15"
           />
         </Field>
         <div className="flex items-end">

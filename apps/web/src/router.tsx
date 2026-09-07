@@ -17,6 +17,9 @@ import { SsoErrorPage, SsoSuccessPage } from './pages/sso';
 import { HomePage } from './pages/home';
 import { WelcomePage } from './pages/welcome';
 import { BillingPage } from './pages/settings/billing';
+import { SequencesPage } from './pages/sequences/sequences-page';
+import { PublicQuotePage } from './pages/quotes/public-quote';
+import { NotificationPreferencesPage } from './pages/settings/notifications';
 import { WorkflowsPage } from './pages/settings/workflows';
 import { ProfilePage } from './pages/settings/profile';
 import { SecurityPage } from './pages/settings/security';
@@ -87,6 +90,24 @@ const billingRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/settings/billing',
   component: BillingPage,
+});
+
+const notificationsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/settings/notifications',
+  component: NotificationPreferencesPage,
+});
+
+const sequencesRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/sequences',
+  component: SequencesPage,
+});
+
+const publicQuoteRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/quotes/$token',
+  component: PublicQuotePage,
 });
 
 const workflowsRoute = createRoute({
@@ -273,6 +294,8 @@ const routeTree = rootRoute.addChildren([
     homeRoute,
     welcomeRoute,
     billingRoute,
+    notificationsRoute,
+    sequencesRoute,
     workflowsRoute,
     dealsRoute,
     dealDetailRoute,
@@ -305,6 +328,7 @@ const routeTree = rootRoute.addChildren([
   inviteRoute,
   ssoSuccessRoute,
   ssoErrorRoute,
+  publicQuoteRoute,
 ]);
 
 export const router = createRouter({ routeTree });

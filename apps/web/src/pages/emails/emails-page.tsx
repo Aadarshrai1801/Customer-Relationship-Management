@@ -28,6 +28,22 @@ function formatDate(value: string | null): string {
   });
 }
 
+/** Best-effort open/click signals (Apple MPP undercounts — see API docs). */
+function TrackingCounts({ activityId }: { activityId: string }): React.JSX.Element {
+  const trackingQuery = useQuery({
+    queryKey: ['email-tracking', activityId],
+    queryFn: () => api<{ opens: number; clicks: number }>(`/emails/${activityId}/tracking`),
+    staleTime: 60_000,
+  });
+  if (trackingQuery.isLoading) return <span>tracking…</span>;
+  if (trackingQuery.isError || !trackingQuery.data) return <span>tracking n/a</span>;
+  return (
+    <span>
+      {trackingQuery.data.opens} opens · {trackingQuery.data.clicks} clicks
+    </span>
+  );
+}
+
 export function EmailsPage(): React.JSX.Element {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -150,6 +166,12 @@ export function EmailsPage(): React.JSX.Element {
                     : (mail.senderEmail ?? '—')}
                   {' · '}
                   {formatDate(mail.occurredAt)}
+                  {mail.direction === 'outbound' && (
+                    <>
+                      {' · '}
+                      <TrackingCounts activityId={mail.id} />
+                    </>
+                  )}
                 </p>
                 {mail.body && (
                   <p className="whitespace-pre-wrap text-text-primary">{mail.body.slice(0, 300)}</p>

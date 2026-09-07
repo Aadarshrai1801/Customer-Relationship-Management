@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, hasScope } from '../../lib/api';
+import { API_URL, api, hasScope } from '../../lib/api';
 import { useAuth } from '../../lib/providers';
 import { Badge, Button, Card, EmptyState, Field, Input, Skeleton } from '../../components/ui';
 import { Modal } from '../../components/modal';
@@ -140,6 +140,46 @@ function CacheNote({
   );
 }
 
+function ExportButton({ report }: { report: string }): React.JSX.Element {
+  const { notify } = useToast();
+  const [pending, setPending] = useState(false);
+
+  async function download(): Promise<void> {
+    setPending(true);
+    try {
+      const res = await fetch(`${API_URL}/v1/reports/${report}/export`, { credentials: 'include' });
+      if (!res.ok) throw new Error(`Export failed (${res.status})`);
+      const blob = await res.blob();
+      const disposition = res.headers.get('content-disposition') ?? '';
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? `${report}.csv`;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      notify('success', `Exported ${filename}`);
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Button
+      variant="secondary"
+      onClick={() => void download()}
+      disabled={pending}
+      className="h-7 text-xs"
+    >
+      {pending ? 'Exporting…' : 'Export CSV'}
+    </Button>
+  );
+}
+
 export function ReportsPage(): React.JSX.Element {
   const { user } = useAuth();
   const [tab, setTab] = useState<ReportTab>('forecast');
@@ -210,13 +250,16 @@ function ForecastPanel(): React.JSX.Element {
 
   return (
     <div className="flex flex-col gap-4">
-      <CacheNote
-        meta={meta}
-        onRefresh={() => {
-          setRefresh((n) => n + 1);
-          void queryClient.invalidateQueries({ queryKey: ['report-forecast'] });
-        }}
-      />
+      <div className="flex items-center justify-between gap-2">
+        <CacheNote
+          meta={meta}
+          onRefresh={() => {
+            setRefresh((n) => n + 1);
+            void queryClient.invalidateQueries({ queryKey: ['report-forecast'] });
+          }}
+        />
+        <ExportButton report="forecast" />
+      </div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {cards.map((c) => (
           <Card key={c.label} title={c.label} description="">
@@ -299,7 +342,10 @@ function PipelinePanel(): React.JSX.Element {
   const { data, meta } = pipelineQuery.data;
   return (
     <div className="flex flex-col gap-4">
-      <CacheNote meta={meta} onRefresh={() => void pipelineQuery.refetch()} />
+      <div className="flex items-center justify-between gap-2">
+        <CacheNote meta={meta} onRefresh={() => void pipelineQuery.refetch()} />
+        <ExportButton report="pipeline" />
+      </div>
       {data.pipelines.map((p) => (
         <Card
           key={p.pipeline.id}
@@ -360,7 +406,10 @@ function ActivityPanel(): React.JSX.Element {
 
   return (
     <div className="flex flex-col gap-4">
-      <CacheNote meta={meta} onRefresh={() => void activityQuery.refetch()} />
+      <div className="flex items-center justify-between gap-2">
+        <CacheNote meta={meta} onRefresh={() => void activityQuery.refetch()} />
+        <ExportButton report="activity" />
+      </div>
       <Card title="Filters" description="">
         <form
           className="flex items-end gap-2"
@@ -446,7 +495,10 @@ function ConversionPanel(): React.JSX.Element {
 
   return (
     <div className="flex flex-col gap-4">
-      <CacheNote meta={meta} onRefresh={() => void conversionQuery.refetch()} />
+      <div className="flex items-center justify-between gap-2">
+        <CacheNote meta={meta} onRefresh={() => void conversionQuery.refetch()} />
+        <ExportButton report="conversion" />
+      </div>
       <Card
         title={`Lead funnel · ${data.leads.total} leads · ${data.leads.convertedRate}% converted`}
         description=""

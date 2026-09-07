@@ -345,6 +345,16 @@ export function ContactDetailPage(): React.JSX.Element {
                 value={contact.phone}
                 readOnly={!canManage || userFieldRules['phone'] === 'read'}
                 onSave={(val) => handleSaveField('phone', val || null)}
+                renderDisplay={(val) =>
+                  val ? (
+                    <a
+                      href={`tel:${String(val).replace(/\s+/g, '')}`}
+                      className="text-accent hover:underline"
+                    >
+                      {String(val)}
+                    </a>
+                  ) : null
+                }
               />
 
               <InlineEdit

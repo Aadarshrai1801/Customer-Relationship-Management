@@ -107,6 +107,7 @@ function setupApi(overrides?: {
   lineItems?: unknown[];
   products?: unknown[];
   competitors?: unknown[];
+  quotes?: unknown[];
   onDelete?: () => void;
 }) {
   mockApi.mockImplementation((url: string, init?: { method?: string }) => {
@@ -185,6 +186,12 @@ function setupApi(overrides?: {
     if (url.startsWith('/accounts')) return Promise.resolve({ accounts: [] });
     if (url.startsWith('/contacts')) return Promise.resolve({ contacts: [] });
     if (url === '/competitors') return Promise.resolve(overrides?.competitors ?? []);
+    if (url === '/quotes' && init?.method === 'POST') {
+      return Promise.resolve({
+        quote: { id: 'q-1', number: 'Q-1', total: 100, currency: 'USD', status: 'draft', publicToken: 'tok' },
+      });
+    }
+    if (url.startsWith('/quotes')) return Promise.resolve(overrides?.quotes ?? []);
     if (url.includes('/stage')) return Promise.resolve({ deal: DEAL, changed: true });
     if (url === '/deals/deal-1' && init?.method === 'DELETE') {
       overrides?.onDelete?.();
@@ -345,6 +352,25 @@ describe('DealDetailPage', () => {
         expect.objectContaining({
           method: 'PATCH',
           body: expect.objectContaining({ competitorId: 'comp-1' }),
+        }),
+      ),
+    );
+  });
+
+  it('drafts a quote from line items', async () => {
+    const user = userEvent.setup();
+    renderDetail();
+    await screen.findByRole('heading', { name: 'Acme Expansion' });
+    expect(await screen.findByText('No quotes yet.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Draft quote' }));
+
+    await waitFor(() =>
+      expect(mockApi).toHaveBeenCalledWith(
+        '/quotes',
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.objectContaining({ dealId: 'deal-1', discountRate: 0 }),
         }),
       ),
     );

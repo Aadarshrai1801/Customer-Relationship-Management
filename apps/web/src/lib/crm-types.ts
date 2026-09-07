@@ -297,6 +297,7 @@ export interface SerializedActivity {
   direction: string;
   senderEmail: string | null;
   recipientEmails: string[];
+  durationSeconds: number | null;
   createdAt: string;
   updatedAt: string;
 }

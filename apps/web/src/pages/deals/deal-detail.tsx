@@ -477,7 +477,6 @@ export function DealDetailPage(): React.JSX.Element {
               </div>
             </dl>
           </Card>
-
           <Card
             title="Products & line items"
             description={
@@ -493,8 +492,8 @@ export function DealDetailPage(): React.JSX.Element {
               canManage={canManage}
             />
           </Card>
-
-          <CommentsThread entityType="deal" entityId={deal.id} />
+          <QuotesCard dealId={deal.id} currency={deal.currency} canManage={canManage} />
+          <CommentsThread entityType="deal" entityId={deal.id} />{' '}
           <AttachmentsCard entityType="deal" entityId={deal.id} />
         </div>
       </div>
@@ -608,6 +607,147 @@ function formatDuration(totalSeconds: number): string {
   if (totalSeconds < 3600) return `${Math.floor(totalSeconds / 60)}m`;
   if (totalSeconds < 86400) return `${Math.floor(totalSeconds / 3600)}h`;
   return `${Math.floor(totalSeconds / 86400)}d`;
+}
+
+interface QuoteDto {
+  id: string;
+  number: string;
+  total: number;
+  currency: string;
+  status: string;
+  publicToken: string | null;
+  validUntil: string | null;
+}
+
+function QuotesCard({
+  dealId,
+  currency,
+  canManage,
+}: {
+  dealId: string;
+  currency: string;
+  canManage: boolean;
+}): React.JSX.Element {
+  const { notify } = useToast();
+  const queryClient = useQueryClient();
+  const [discount, setDiscount] = useState('0');
+
+  const quotesQuery = useQuery({
+    queryKey: ['quotes', dealId],
+    queryFn: () => api<QuoteDto[]>(`/quotes?dealId=${dealId}`),
+  });
+  const quotes = Array.isArray(quotesQuery.data) ? quotesQuery.data : [];
+
+  async function refresh(): Promise<void> {
+    await queryClient.invalidateQueries({ queryKey: ['quotes', dealId] });
+  }
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const rate = Number(discount) || 0;
+      if (rate < 0 || rate > 1) throw new Error('Discount must be between 0 and 1');
+      return api('/quotes', { method: 'POST', body: { dealId, discountRate: rate } });
+    },
+    onSuccess: () => {
+      setDiscount('0');
+      void refresh();
+      notify('success', 'Quote drafted from line items');
+    },
+    onError: (err: Error) => notify('error', err.message || 'Failed to create quote'),
+  });
+
+  async function send(id: string): Promise<void> {
+    try {
+      await api(`/quotes/${id}/send`, { method: 'POST', body: {} });
+      await refresh();
+      notify('success', 'Quote sent');
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Send failed');
+    }
+  }
+
+  return (
+    <Card title="Quotes" description="Snapshot line items; clients accept via link.">
+      {quotes.length === 0 ? (
+        <p className="text-xs italic text-text-secondary">No quotes yet.</p>
+      ) : (
+        <ul className="flex flex-col gap-2 text-xs">
+          {quotes.map((quote) => (
+            <li
+              key={quote.id}
+              className="flex items-center justify-between gap-2 rounded border border-border px-3 py-2"
+            >
+              <span>
+                <span className="font-medium">{quote.number}</span>{' '}
+                <span className="text-text-secondary">
+                  {currency} {Number(quote.total).toFixed(2)}
+                </span>{' '}
+                <Badge
+                  tone={
+                    quote.status === 'accepted'
+                      ? 'success'
+                      : quote.status === 'sent'
+                        ? 'info'
+                        : 'neutral'
+                  }
+                >
+                  {quote.status}
+                </Badge>
+              </span>
+              <span className="flex items-center gap-2">
+                {quote.publicToken && (
+                  <a
+                    href={`${window.location.origin}/quotes/${quote.publicToken}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-accent hover:underline"
+                  >
+                    View link
+                  </a>
+                )}
+                {canManage && quote.status === 'draft' && (
+                  <button
+                    type="button"
+                    onClick={() => void send(quote.id)}
+                    className="rounded px-1.5 py-0.5 text-accent hover:bg-surface-raised"
+                  >
+                    Send
+                  </button>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {canManage && (
+        <form
+          className="mt-3 flex items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            createMutation.mutate();
+          }}
+        >
+          <Field label="Quote discount (0-1)" htmlFor={`quote-discount-${dealId}`}>
+            <Input
+              id={`quote-discount-${dealId}`}
+              inputMode="decimal"
+              value={discount}
+              onChange={(e) => setDiscount(e.target.value)}
+              placeholder="0"
+            />
+          </Field>
+          <Button
+            type="submit"
+            variant="secondary"
+            disabled={createMutation.isPending}
+            className="h-9 text-xs"
+          >
+            {createMutation.isPending ? 'Drafting…' : 'Draft quote'}
+          </Button>
+        </form>
+      )}
+    </Card>
+  );
 }
 
 function CompetitorPicker({
