@@ -303,6 +303,57 @@ export type Comment = typeof comments.$inferSelect;
 export type NewComment = typeof comments.$inferInsert;
 export type Attachment = typeof attachments.$inferSelect;
 export type NewAttachment = typeof attachments.$inferInsert;
+export type Subscription = typeof subscriptions.$inferSelect;
+export type NewSubscription = typeof subscriptions.$inferInsert;
+export type Invoice = typeof invoices.$inferSelect;
+export type NewInvoice = typeof invoices.$inferInsert;
+
+/**
+ * Module 10 (PRD 4.15 P0): self-serve billing. One subscription row per
+ * org (30-day cycle anchored at cycleStart); invoices are immutable
+ * records of confirmed seat/plan changes. Amounts follow the codebase
+ * convention (numeric dollars, 2dp). Charges run through BillingProvider
+ * (stub until Stripe keys exist).
+ */
+export const subscriptions = pgTable(
+  'subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    plan: text('plan').notNull().default('trial'),
+    seats: integer('seats').notNull().default(1),
+    status: text('status').notNull().default('active'),
+    cycleStart: timestamp('cycle_start', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uq_subscriptions_org').on(t.orgId)],
+);
+
+export const invoices = pgTable(
+  'invoices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    number: text('number').notNull(),
+    amount: numeric('amount', { precision: 19, scale: 2 }).notNull(),
+    currency: text('currency').notNull().default('USD'),
+    status: text('status').notNull().default('paid'),
+    periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
+    periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
+    lines: jsonb('lines').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    providerRef: text('provider_ref'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ix_invoices_org_created').on(t.orgId, t.createdAt),
+    uniqueIndex('uq_invoices_org_number').on(t.orgId, t.number),
+  ],
+);
 
 /**
  * Module 8 (PRD 4.13 P0): internal comments on contacts, deals, and
