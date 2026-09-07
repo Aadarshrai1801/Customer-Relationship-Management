@@ -1,13 +1,19 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, sql } from 'drizzle-orm';
-import { auditLogEntries, contactMerges, contactNotes, users } from '@nexus/db';
+import { auditLogEntries, activities, contactMerges, contactNotes, users } from '@nexus/db';
 import { TenantDb, type NexusDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
 import { ContactsService } from '../contacts/contacts.service';
 
 export interface TimelineItem {
   id: string;
-  type: 'contact_created' | 'contact_updated' | 'contact_deleted' | 'contact_merged' | 'note_added';
+  type:
+    | 'contact_created'
+    | 'contact_updated'
+    | 'contact_deleted'
+    | 'contact_merged'
+    | 'note_added'
+    | 'activity_logged';
   occurredAt: Date;
   actor: { id: string | null; email: string | null };
   summary: string;
@@ -122,6 +128,23 @@ export class TimelineService {
         )
         .orderBy(desc(contactNotes.createdAt), desc(contactNotes.id));
 
+      // Module 5: unified activity log (calls, meetings, emails, task
+      // completions, synced calendar events) merged into the same feed.
+      const activityRows = await db
+        .select({ activity: activities, owner: users })
+        .from(activities)
+        .leftJoin(users, eq(activities.ownerId, users.id))
+        .where(
+          and(
+            eq(activities.orgId, auth.org.id),
+            sql`${activities.contactId} IN (${sql.join(
+              contactIds.map((id) => sql`${id}`),
+              sql`, `,
+            )})`,
+          ),
+        )
+        .orderBy(desc(activities.occurredAt), desc(activities.id));
+
       const items: RawItem[] = [
         ...auditRows.map((a) => ({
           id: `a${a.id}`,
@@ -151,6 +174,24 @@ export class TimelineService {
             body: n.note.body,
             authorName: n.author?.name ?? null,
             viaMerge: n.note.contactId !== row.contact.id,
+          },
+          sortKey: '',
+        })),
+        ...activityRows.map((a) => ({
+          id: `e${a.activity.id}`,
+          type: 'activity_logged' as const,
+          occurredAt: a.activity.occurredAt,
+          actor: a.owner ? { id: a.owner.id, email: a.owner.email } : { id: null, email: null },
+          summary: `Logged ${a.activity.type}: ${a.activity.subject ?? '(no subject)'}`,
+          data: {
+            activityId: a.activity.id,
+            activityType: a.activity.type,
+            subject: a.activity.subject,
+            body: a.activity.body,
+            provider: a.activity.provider,
+            syncStatus: a.activity.syncStatus,
+            conflictFlag: a.activity.conflictFlag,
+            viaMerge: a.activity.contactId !== row.contact.id,
           },
           sortKey: '',
         })),

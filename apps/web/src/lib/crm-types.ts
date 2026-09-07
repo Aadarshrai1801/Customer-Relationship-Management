@@ -74,7 +74,13 @@ export interface ContactNote {
 
 export interface TimelineItem {
   id: string;
-  type: 'contact_created' | 'contact_updated' | 'contact_deleted' | 'contact_merged' | 'note_added';
+  type:
+    | 'contact_created'
+    | 'contact_updated'
+    | 'contact_deleted'
+    | 'contact_merged'
+    | 'note_added'
+    | 'activity_logged';
   occurredAt: string;
   actor: { id: string | null; email: string | null };
   summary: string;
@@ -245,6 +251,47 @@ export interface CatalogProduct {
   currency: string;
   taxRate: string;
   isActive: boolean;
+}
+
+export interface SerializedTask {
+  id: string;
+  owner: { id: string; name: string } | null;
+  ownerId: string | null;
+  contact: { id: string; name: string } | null;
+  account: { id: string; name: string } | null;
+  deal: { id: string; name: string } | null;
+  title: string;
+  description: string | null;
+  status: 'open' | 'completed' | 'cancelled';
+  priority: 'low' | 'normal' | 'high';
+  dueAt: string | null;
+  remindAt: string | null;
+  reminderSentAt: string | null;
+  completedAt: string | null;
+  overdue: boolean;
+  reminderDue: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SerializedActivity {
+  id: string;
+  owner: { id: string; name: string } | null;
+  ownerId: string | null;
+  contact: { id: string; name: string } | null;
+  account: { id: string; name: string } | null;
+  deal: { id: string; name: string } | null;
+  taskId: string | null;
+  type: 'call' | 'meeting' | 'email' | 'task';
+  subject: string | null;
+  body: string | null;
+  occurredAt: string;
+  provider: string | null;
+  externalId: string | null;
+  syncStatus: string;
+  conflictFlag: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type LeadStatus = 'new' | 'contacted' | 'qualified' | 'unqualified' | 'converted';
