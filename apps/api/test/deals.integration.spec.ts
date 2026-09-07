@@ -119,10 +119,14 @@ describe('deals core crud, scoping, and custom fields', () => {
       .send({ name: 'X', amount: 5, probability: 150 });
     expect(badProbability.status).toBe(400);
 
-    const stageWithoutPipeline = await ownerAgent
-      .post('/v1/deals')
-      .send({ name: 'X', amount: 5, stageId: discoveryStageId });
-    expect(stageWithoutPipeline.status).toBe(400);
+    const stageAlone = await ownerAgent.post('/v1/deals').send({
+      name: 'Stage Only',
+      amount: 5,
+      stageId: discoveryStageId,
+    });
+    expect(stageAlone.status).toBe(201);
+    expect(stageAlone.body.deal.stage.id).toBe(discoveryStageId);
+    expect(stageAlone.body.deal.pipeline.id).toBe(pipelineId);
 
     const unknownPipeline = await ownerAgent.post('/v1/deals').send({
       name: 'X',

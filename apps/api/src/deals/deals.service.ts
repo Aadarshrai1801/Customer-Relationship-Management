@@ -60,6 +60,7 @@ export interface SerializedDeal {
   effectiveProbability: number;
   weightedValue: number;
   expectedCloseDate: Date | null;
+  closeDateStatus: 'overdue' | 'due-soon' | 'on-track' | null;
   status: 'open' | 'won' | 'lost';
   lossReason: string | null;
   closedAt: Date | null;
@@ -98,6 +99,24 @@ function toNumber(value: string | number, field: string): number {
   const parsed = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(parsed)) throw new Error(`Invalid numeric value for ${field}`);
   return parsed;
+}
+
+/**
+ * Close-date decay signal. Overdue = past expected close while still open;
+ * due-soon = within the next 7 days. Thresholds are a stated assumption —
+ * configurable decay rules belong to a later reporting pass.
+ */
+function closeDateStatus(
+  status: 'open' | 'won' | 'lost',
+  expectedCloseDate: Date | null,
+): 'overdue' | 'due-soon' | 'on-track' | null {
+  if (status !== 'open' || !expectedCloseDate) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const close = expectedCloseDate.toISOString().slice(0, 10);
+  if (close < today) return 'overdue';
+  const inSevenDays = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  if (close <= inSevenDays) return 'due-soon';
+  return 'on-track';
 }
 
 @Injectable()
@@ -475,6 +494,284 @@ export class DealsService {
     });
   }
 
+  /**
+   * Moves a deal between stages of its own pipeline. Closes the open history
+   * row (recording duration), opens a new one, and derives status/closedAt
+   * from the target stage flags. Loss-reason enforcement lands in M4-PR4;
+   * a provided reason is stored as-is until then.
+   */
+  async transitionStage(
+    auth: AuthContext,
+    id: string,
+    input: { stageId: string; lossReason?: string },
+  ): Promise<{ deal: SerializedDeal; changed: boolean }> {
+    return this.tenantDb.tx(auth.org.id, async (db) => {
+      const defs = await this.fields.loadDefinitions(db, auth.org.id, 'deal');
+      const row = await this.requireLiveDeal(db, auth.org.id, id);
+      this.assertDealReadable(auth, row.deal.ownerId);
+
+      const [target] = await db
+        .select()
+        .from(pipelineStages)
+        .where(
+          and(
+            eq(pipelineStages.id, input.stageId),
+            eq(pipelineStages.pipelineId, row.deal.pipelineId),
+            eq(pipelineStages.orgId, auth.org.id),
+          ),
+        );
+      if (!target) {
+        throw new NotFoundException({
+          message: 'Stage not found in this deal\u2019s pipeline',
+          code: 'STAGE_NOT_FOUND',
+        });
+      }
+      if (target.id === row.deal.stageId) {
+        return {
+          deal: await this.serializeById(db, auth, defs, row.deal.id),
+          changed: false,
+        };
+      }
+
+      const now = new Date();
+      const openRows = await db
+        .select({ id: dealStageHistory.id, enteredAt: dealStageHistory.enteredAt })
+        .from(dealStageHistory)
+        .where(
+          and(
+            eq(dealStageHistory.dealId, row.deal.id),
+            eq(dealStageHistory.orgId, auth.org.id),
+            isNull(dealStageHistory.exitedAt),
+          ),
+        );
+      for (const open of openRows) {
+        await db
+          .update(dealStageHistory)
+          .set({
+            exitedAt: now,
+            durationSeconds: Math.max(
+              0,
+              Math.floor((now.getTime() - open.enteredAt.getTime()) / 1000),
+            ),
+          })
+          .where(eq(dealStageHistory.id, open.id));
+      }
+      await db.insert(dealStageHistory).values({
+        orgId: auth.org.id,
+        dealId: row.deal.id,
+        fromStageId: row.stage.id,
+        toStageId: target.id,
+        fromStageName: row.stage.name,
+        toStageName: target.name,
+        actorUserId: auth.user.id,
+      });
+
+      const status = target.isClosedWon ? 'won' : target.isClosedLost ? 'lost' : 'open';
+      const [updated] = await db
+        .update(deals)
+        .set({
+          stageId: target.id,
+          status,
+          closedAt: status === 'open' ? null : now,
+          lossReason: input.lossReason !== undefined ? input.lossReason : row.deal.lossReason,
+          updatedAt: now,
+        })
+        .where(eq(deals.id, row.deal.id))
+        .returning();
+      if (!updated) throw new Error('Failed to transition deal');
+
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: 'deal.stage_changed',
+        entityType: 'deal',
+        entityId: updated.id,
+        oldValues: { stageId: row.stage.id, stageName: row.stage.name, status: row.deal.status },
+        newValues: { stageId: target.id, stageName: target.name, status },
+      });
+      return { deal: await this.serializeById(db, auth, defs, updated.id), changed: true };
+    });
+  }
+
+  async history(
+    auth: AuthContext,
+    id: string,
+  ): Promise<Array<typeof dealStageHistory.$inferSelect>> {
+    return this.tenantDb.tx(auth.org.id, async (db) => {
+      const row = await this.requireLiveDeal(db, auth.org.id, id);
+      this.assertDealReadable(auth, row.deal.ownerId);
+      return db
+        .select()
+        .from(dealStageHistory)
+        .where(
+          and(eq(dealStageHistory.dealId, row.deal.id), eq(dealStageHistory.orgId, auth.org.id)),
+        )
+        .orderBy(desc(dealStageHistory.enteredAt), desc(dealStageHistory.id));
+    });
+  }
+
+  /**
+   * Weighted forecast for one pipeline, summed in the org base currency.
+   * Closed deals are excluded by default (status=open); pass status=all to
+   * include them. Overdue = open with an expected close date before today.
+   */
+  async forecast(
+    auth: AuthContext,
+    pipelineId: string,
+    filter: { ownerId?: string; status?: 'open' | 'won' | 'lost' | 'all' },
+  ): Promise<{
+    pipeline: { id: string; name: string; slug: string };
+    baseCurrency: string;
+    stages: Array<{
+      stage: { id: string; key: string; name: string; position: number; probability: number };
+      dealCount: number;
+      totalBaseAmount: number;
+      weightedValue: number;
+      overdueCount: number;
+      overdueBaseAmount: number;
+    }>;
+    totals: { dealCount: number; totalBaseAmount: number; weightedValue: number };
+  }> {
+    return this.tenantDb.tx(auth.org.id, async (db) => {
+      const [pipeline] = await db
+        .select()
+        .from(pipelines)
+        .where(and(eq(pipelines.id, pipelineId), eq(pipelines.orgId, auth.org.id)));
+      if (!pipeline) {
+        throw new NotFoundException({ message: 'Pipeline not found', code: 'PIPELINE_NOT_FOUND' });
+      }
+      const stages = await db
+        .select()
+        .from(pipelineStages)
+        .where(eq(pipelineStages.pipelineId, pipeline.id))
+        .orderBy(pipelineStages.position);
+      const baseCurrency = await this.orgBaseCurrency(db, auth.org.id);
+      const canSeeAll = this.recordScope(auth) === 'all';
+      const status = filter.status ?? 'open';
+
+      const conditions = [
+        eq(deals.orgId, auth.org.id),
+        eq(deals.pipelineId, pipeline.id),
+        isNull(deals.deletedAt),
+      ];
+      if (status !== 'all') conditions.push(eq(deals.status, status));
+      if (!canSeeAll) {
+        if (filter.ownerId && filter.ownerId !== auth.user.id) {
+          return this.emptyForecast(pipeline, stages, baseCurrency);
+        }
+        conditions.push(eq(deals.ownerId, auth.user.id));
+      } else if (filter.ownerId) {
+        conditions.push(eq(deals.ownerId, filter.ownerId));
+      }
+
+      const rows = await db
+        .select({
+          deal: deals,
+          probability: pipelineStages.probability,
+        })
+        .from(deals)
+        .innerJoin(pipelineStages, eq(deals.stageId, pipelineStages.id))
+        .where(and(...conditions));
+
+      const today = new Date().toISOString().slice(0, 10);
+      const byStage = new Map<
+        string,
+        {
+          dealCount: number;
+          totalBaseAmount: number;
+          weightedValue: number;
+          overdueCount: number;
+          overdueBaseAmount: number;
+        }
+      >();
+      for (const stage of stages) {
+        byStage.set(stage.id, {
+          dealCount: 0,
+          totalBaseAmount: 0,
+          weightedValue: 0,
+          overdueCount: 0,
+          overdueBaseAmount: 0,
+        });
+      }
+      const totals = { dealCount: 0, totalBaseAmount: 0, weightedValue: 0 };
+      for (const row of rows) {
+        const bucket = byStage.get(row.deal.stageId);
+        if (!bucket) continue;
+        const base = toNumber(row.deal.baseAmount, 'baseAmount');
+        const probability = row.deal.probability ?? row.probability;
+        const weighted = Math.round(base * (probability / 100) * 100) / 100;
+        bucket.dealCount += 1;
+        bucket.totalBaseAmount = Math.round((bucket.totalBaseAmount + base) * 100) / 100;
+        bucket.weightedValue = Math.round((bucket.weightedValue + weighted) * 100) / 100;
+        totals.dealCount += 1;
+        totals.totalBaseAmount = Math.round((totals.totalBaseAmount + base) * 100) / 100;
+        totals.weightedValue = Math.round((totals.weightedValue + weighted) * 100) / 100;
+        if (
+          row.deal.status === 'open' &&
+          row.deal.expectedCloseDate &&
+          row.deal.expectedCloseDate.toISOString().slice(0, 10) < today
+        ) {
+          bucket.overdueCount += 1;
+          bucket.overdueBaseAmount = Math.round((bucket.overdueBaseAmount + base) * 100) / 100;
+        }
+      }
+      return {
+        pipeline: { id: pipeline.id, name: pipeline.name, slug: pipeline.slug },
+        baseCurrency,
+        stages: stages.map((stage) => ({
+          stage: {
+            id: stage.id,
+            key: stage.key,
+            name: stage.name,
+            position: stage.position,
+            probability: stage.probability,
+          },
+          ...byStage.get(stage.id)!,
+        })),
+        totals,
+      };
+    });
+  }
+
+  private emptyForecast(
+    pipeline: { id: string; name: string; slug: string },
+    stages: Array<{ id: string; key: string; name: string; position: number; probability: number }>,
+    baseCurrency: string,
+  ): {
+    pipeline: { id: string; name: string; slug: string };
+    baseCurrency: string;
+    stages: Array<{
+      stage: { id: string; key: string; name: string; position: number; probability: number };
+      dealCount: number;
+      totalBaseAmount: number;
+      weightedValue: number;
+      overdueCount: number;
+      overdueBaseAmount: number;
+    }>;
+    totals: { dealCount: number; totalBaseAmount: number; weightedValue: number };
+  } {
+    return {
+      pipeline: { id: pipeline.id, name: pipeline.name, slug: pipeline.slug },
+      baseCurrency,
+      stages: stages.map((stage) => ({
+        stage: {
+          id: stage.id,
+          key: stage.key,
+          name: stage.name,
+          position: stage.position,
+          probability: stage.probability,
+        },
+        dealCount: 0,
+        totalBaseAmount: 0,
+        weightedValue: 0,
+        overdueCount: 0,
+        overdueBaseAmount: 0,
+      })),
+      totals: { dealCount: 0, totalBaseAmount: 0, weightedValue: 0 },
+    };
+  }
+
   private recordScope(auth: AuthContext): 'all' | 'own' {
     return auth.role.permissions?.recordAccess?.['deal'] ?? 'own';
   }
@@ -492,6 +789,29 @@ export class DealsService {
     orgId: string,
     input: { pipelineId?: string; stageId?: string },
   ): Promise<{ pipeline: { id: string; name: string; slug: string }; stage: PipelineStage }> {
+    if (!input.pipelineId && input.stageId) {
+      const [stage] = await db
+        .select()
+        .from(pipelineStages)
+        .where(and(eq(pipelineStages.id, input.stageId), eq(pipelineStages.orgId, orgId)));
+      if (!stage) {
+        throw new NotFoundException({
+          message: 'Stage not found',
+          code: 'STAGE_NOT_FOUND',
+        });
+      }
+      const [pipeline] = await db
+        .select()
+        .from(pipelines)
+        .where(and(eq(pipelines.id, stage.pipelineId), eq(pipelines.orgId, orgId)));
+      if (!pipeline) {
+        throw new NotFoundException({ message: 'Pipeline not found', code: 'PIPELINE_NOT_FOUND' });
+      }
+      return {
+        pipeline: { id: pipeline.id, name: pipeline.name, slug: pipeline.slug },
+        stage,
+      };
+    }
     if (!input.pipelineId) {
       const defaults = await this.pipelines.ensureDefaultPipeline(orgId);
       const first = defaults.stages[0];
@@ -742,6 +1062,7 @@ export class DealsService {
       effectiveProbability,
       weightedValue,
       expectedCloseDate: deal.expectedCloseDate,
+      closeDateStatus: closeDateStatus(deal.status, deal.expectedCloseDate),
       status: deal.status,
       lossReason: deal.lossReason,
       closedAt: deal.closedAt,

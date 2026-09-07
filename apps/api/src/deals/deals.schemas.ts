@@ -22,11 +22,7 @@ export const createDealSchema = z
     expectedCloseDate: z.string().datetime({ offset: true }).optional(),
     customFields: customFieldsSchema,
   })
-  .strict()
-  .refine((v) => (v.pipelineId ? true : !v.stageId), {
-    message: 'stageId requires pipelineId',
-    path: ['stageId'],
-  });
+  .strict();
 
 export const updateDealSchema = z
   .object({

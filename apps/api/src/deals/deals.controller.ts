@@ -23,6 +23,12 @@ import {
   type ListDealsQuery,
   type UpdateDealInput,
 } from './deals.schemas';
+import {
+  forecastQuerySchema,
+  transitionDealSchema,
+  type ForecastQuery,
+  type TransitionDealInput,
+} from '../pipelines/pipelines.schemas';
 
 function authOf(req: Request): NonNullable<Request['auth']> {
   if (!req.auth) throw new UnauthorizedException();
@@ -71,5 +77,31 @@ export class DealsController {
   @Delete(':id')
   async remove(@Req() req: Request, @Param('id') id: string): Promise<unknown> {
     return this.deals.remove(authOf(req), id);
+  }
+
+  @RequireScopes('deals:manage')
+  @Post(':id/stage')
+  async transition(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(transitionDealSchema)) body: unknown,
+  ): Promise<unknown> {
+    return this.deals.transitionStage(authOf(req), id, body as TransitionDealInput);
+  }
+
+  @RequireScopes('deals:read')
+  @Get(':id/history')
+  async history(@Req() req: Request, @Param('id') id: string): Promise<unknown> {
+    return this.deals.history(authOf(req), id);
+  }
+
+  @RequireScopes('deals:read')
+  @Get('forecast/by-pipeline')
+  async forecast(
+    @Req() req: Request,
+    @Query(new ZodValidationPipe(forecastQuerySchema)) query: unknown,
+  ): Promise<unknown> {
+    const { pipelineId, ownerId, status } = query as ForecastQuery;
+    return this.deals.forecast(authOf(req), pipelineId, { ownerId, status });
   }
 }
