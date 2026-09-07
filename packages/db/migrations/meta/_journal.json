@@ -78,6 +78,13 @@
       "when": 1788750225538,
       "tag": "0010_deals",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788760736029,
+      "tag": "0011_tasks",
+      "breakpoints": true
     }
   ]
 }

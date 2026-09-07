@@ -286,6 +286,10 @@ export type DealStageHistory = typeof dealStageHistory.$inferSelect;
 export type ExchangeRate = typeof exchangeRates.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type DealLineItem = typeof dealLineItems.$inferSelect;
+export type Task = typeof tasks.$inferSelect;
+export type NewTask = typeof tasks.$inferInsert;
+export type Activity = typeof activities.$inferSelect;
+export type NewActivity = typeof activities.$inferInsert;
 export type GdprExport = typeof gdprExports.$inferSelect;
 export type NewGdprExport = typeof gdprExports.$inferInsert;
 export type Account = typeof accounts.$inferSelect;
@@ -830,6 +834,83 @@ export const dealLineItems = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('ix_deal_line_items_deal').on(t.orgId, t.dealId)],
+);
+
+/**
+ * Module 5 (PRD 4.4 P0): tasks with due/reminder tracking. Status is
+ * open | completed | cancelled; priority is low | normal | high.
+ * Links to CRM records are nullable set-null FKs so deleting a contact,
+ * account, or deal never deletes the task itself.
+ */
+export const tasks = pgTable(
+  'tasks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+    contactId: uuid('contact_id').references(() => contacts.id, { onDelete: 'set null' }),
+    accountId: uuid('account_id').references(() => accounts.id, { onDelete: 'set null' }),
+    dealId: uuid('deal_id').references(() => deals.id, { onDelete: 'set null' }),
+    title: text('title').notNull(),
+    description: text('description'),
+    status: text('status').notNull().default('open'),
+    priority: text('priority').notNull().default('normal'),
+    dueAt: timestamp('due_at', { withTimezone: true }),
+    remindAt: timestamp('remind_at', { withTimezone: true }),
+    reminderSentAt: timestamp('reminder_sent_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ix_tasks_org_owner').on(t.orgId, t.ownerId),
+    index('ix_tasks_org_due').on(t.orgId, t.dueAt),
+  ],
+);
+
+/**
+ * Module 5 (PRD 4.4 P0): unified activity log for calls, meetings, emails,
+ * and task completions. Contact notes stay in contact_notes (existing
+ * feature); the timeline merges both sources.
+ *
+ * Calendar sync (google | outlook) writes here: provider + external_id is
+ * unique per org for idempotent re-syncs. Deleting an event in the provider
+ * flips sync_status to cancelled (never hard-deleted). external_updated_at
+ * tracks the provider's last-modified time; conflict_flag marks edits that
+ * raced a local change (most-recent-wins, flagged for the user).
+ */
+export const activities = pgTable(
+  'activities',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+    contactId: uuid('contact_id').references(() => contacts.id, { onDelete: 'set null' }),
+    accountId: uuid('account_id').references(() => accounts.id, { onDelete: 'set null' }),
+    dealId: uuid('deal_id').references(() => deals.id, { onDelete: 'set null' }),
+    taskId: uuid('task_id').references(() => tasks.id, { onDelete: 'set null' }),
+    type: text('type').notNull(),
+    subject: text('subject'),
+    body: text('body'),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+    provider: text('provider'),
+    externalId: text('external_id'),
+    externalUpdatedAt: timestamp('external_updated_at', { withTimezone: true }),
+    syncStatus: text('sync_status').notNull().default('active'),
+    conflictFlag: boolean('conflict_flag').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ix_activities_org_contact').on(t.orgId, t.contactId),
+    index('ix_activities_org_occurred').on(t.orgId, t.occurredAt),
+    uniqueIndex('uq_activities_org_provider_external').on(t.orgId, t.provider, t.externalId),
+  ],
 );
 
 export * from './env';
