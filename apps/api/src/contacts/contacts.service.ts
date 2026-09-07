@@ -1,12 +1,21 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
-import { accounts, contactMerges, contactNotes, contacts, users, type Contact } from '@nexus/db';
+import {
+  accounts,
+  contactMerges,
+  contactNotes,
+  contacts,
+  deals,
+  users,
+  type Contact,
+} from '@nexus/db';
 import { TenantDb, type NexusDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
 import { AuditService, diffObjects } from '../audit/audit.service';
@@ -359,14 +368,32 @@ export class ContactsService {
     });
   }
 
-  async remove(auth: AuthContext, id: string): Promise<{ ok: true }> {
+  async remove(auth: AuthContext, id: string, confirm = false): Promise<{ ok: true }> {
     return this.tenantDb.tx(auth.org.id, async (db) => {
       const row = await this.findLive(db, auth.org.id, id);
       if (!row) {
         throw new NotFoundException({ message: 'Contact not found', code: 'CONTACT_NOT_FOUND' });
       }
       this.assertReadable(auth, row.contact.ownerId);
-      // Open-deal guard lands with module 4.3 (deals do not exist yet).
+      const [openDeal] = await db
+        .select({ id: deals.id })
+        .from(deals)
+        .where(
+          and(
+            eq(deals.orgId, auth.org.id),
+            eq(deals.contactId, row.contact.id),
+            eq(deals.status, 'open'),
+            isNull(deals.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (openDeal && !confirm) {
+        throw new ConflictException({
+          message: 'Contact has open deals — confirm deletion explicitly',
+          code: 'CONTACT_HAS_OPEN_DEALS',
+          dealId: openDeal.id,
+        });
+      }
       await db
         .update(contacts)
         .set({ deletedAt: new Date() })

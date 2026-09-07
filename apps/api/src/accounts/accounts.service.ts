@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
-import { accounts, accountMerges, contacts, users, type Account } from '@nexus/db';
+import { accounts, accountMerges, contacts, deals, users, type Account } from '@nexus/db';
 import { TenantDb, type NexusDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
 import { AuditService, diffObjects } from '../audit/audit.service';
@@ -357,6 +357,25 @@ export class AccountsService {
         throw new NotFoundException({ message: 'Account not found', code: 'ACCOUNT_NOT_FOUND' });
       }
       this.assertReadable(auth, row.account.ownerId);
+      const [openDeal] = await db
+        .select({ id: deals.id })
+        .from(deals)
+        .where(
+          and(
+            eq(deals.orgId, auth.org.id),
+            eq(deals.accountId, row.account.id),
+            eq(deals.status, 'open'),
+            isNull(deals.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (openDeal) {
+        throw new ConflictException({
+          message: 'Account has open deals — move or close them before deleting',
+          code: 'ACCOUNT_HAS_OPEN_DEALS',
+          dealId: openDeal.id,
+        });
+      }
       await db
         .update(accounts)
         .set({ deletedAt: new Date() })

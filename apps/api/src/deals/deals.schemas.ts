@@ -20,6 +20,7 @@ export const createDealSchema = z
     currency: isoCurrency.default('USD'),
     probability: z.number().int().min(0).max(100).optional(),
     expectedCloseDate: z.string().datetime({ offset: true }).optional(),
+    lossReason: z.string().trim().max(500).optional(),
     customFields: customFieldsSchema,
   })
   .strict();

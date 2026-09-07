@@ -97,7 +97,11 @@ export class ContactsController {
 
   @RequireScopes('contacts:manage')
   @Delete(':id')
-  async remove(@Req() req: Request, @Param('id') id: string): Promise<unknown> {
-    return this.contacts.remove(authOf(req), id);
+  async remove(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Query('confirm') confirm?: string,
+  ): Promise<unknown> {
+    return this.contacts.remove(authOf(req), id, confirm === 'true');
   }
 }

@@ -8,6 +8,7 @@ import {
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import {
   accounts,
+  contactNotes,
   contacts,
   deals,
   dealStageHistory,
@@ -156,6 +157,14 @@ export class DealsService {
         rateDate,
       });
 
+      const lossReason =
+        input.lossReason !== undefined && input.lossReason.trim() ? input.lossReason.trim() : null;
+      if (stage.isClosedLost && !lossReason) {
+        throw new BadRequestException({
+          message: 'A loss reason is required to close a deal as lost',
+          code: 'LOSS_REASON_REQUIRED',
+        });
+      }
       const [created] = await db
         .insert(deals)
         .values({
@@ -174,6 +183,9 @@ export class DealsService {
           exchangeRateDate: converted.rateDate,
           probability: input.probability ?? null,
           expectedCloseDate: input.expectedCloseDate ? new Date(input.expectedCloseDate) : null,
+          status: stage.isClosedWon ? 'won' : stage.isClosedLost ? 'lost' : 'open',
+          lossReason,
+          closedAt: stage.isClosedWon || stage.isClosedLost ? new Date() : null,
           customFields,
         })
         .returning();
@@ -188,6 +200,9 @@ export class DealsService {
         toStageName: stage.name,
         actorUserId: auth.user.id,
       });
+      if (stage.isClosedWon) {
+        await this.applyClosedWon(db, auth, created.id);
+      }
 
       await this.audit.record(db, {
         orgId: auth.org.id,
@@ -532,6 +547,18 @@ export class DealsService {
           changed: false,
         };
       }
+      // Closed Lost requires an explicit reason — a previously stored reason
+      // counts, so re-closing an already-explained loss is not re-prompted.
+      const lossReason =
+        input.lossReason !== undefined && input.lossReason.trim()
+          ? input.lossReason.trim()
+          : (row.deal.lossReason ?? null);
+      if (target.isClosedLost && !lossReason) {
+        throw new BadRequestException({
+          message: 'A loss reason is required to close a deal as lost',
+          code: 'LOSS_REASON_REQUIRED',
+        });
+      }
 
       const now = new Date();
       const openRows = await db
@@ -573,12 +600,16 @@ export class DealsService {
           stageId: target.id,
           status,
           closedAt: status === 'open' ? null : now,
-          lossReason: input.lossReason !== undefined ? input.lossReason : row.deal.lossReason,
+          lossReason: target.isClosedLost ? lossReason : row.deal.lossReason,
           updatedAt: now,
         })
         .where(eq(deals.id, row.deal.id))
         .returning();
       if (!updated) throw new Error('Failed to transition deal');
+
+      if (target.isClosedWon) {
+        await this.applyClosedWon(db, auth, updated.id);
+      }
 
       await this.audit.record(db, {
         orgId: auth.org.id,
@@ -592,6 +623,62 @@ export class DealsService {
       });
       return { deal: await this.serializeById(db, auth, defs, updated.id), changed: true };
     });
+  }
+
+  /**
+   * Closed-Won loop: logs the win on the linked contact's timeline and
+   * advances that contact to the customer lifecycle stage. Runs inside the
+   * transition transaction so a win and its side effects never diverge.
+   * (Accounts carry no stage in this codebase — see module report.)
+   */
+  private async applyClosedWon(db: NexusDb, auth: AuthContext, dealId: string): Promise<void> {
+    const [row] = await db
+      .select({ deal: deals, contact: contacts })
+      .from(deals)
+      .leftJoin(contacts, eq(deals.contactId, contacts.id))
+      .where(and(eq(deals.id, dealId), eq(deals.orgId, auth.org.id)));
+    if (!row || !row.contact || row.contact.deletedAt) return;
+
+    const amount = toNumber(row.deal.amount, 'amount');
+    const baseAmount = toNumber(row.deal.baseAmount, 'baseAmount');
+    const body =
+      `Deal '${row.deal.name}' closed won — ` +
+      `${row.deal.currency} ${amount} (base: ${row.deal.baseCurrency} ${baseAmount}).`;
+    const [note] = await db
+      .insert(contactNotes)
+      .values({
+        orgId: auth.org.id,
+        contactId: row.contact.id,
+        authorId: auth.user.id,
+        body,
+      })
+      .returning({ id: contactNotes.id });
+    await this.audit.record(db, {
+      orgId: auth.org.id,
+      actorUserId: auth.user.id,
+      actorEmail: auth.user.email,
+      action: 'contact.note_added',
+      entityType: 'contact',
+      entityId: row.contact.id,
+      newValues: { noteId: note?.id ?? null, preview: body.slice(0, 500) },
+    });
+
+    if (row.contact.lifecycleStage !== 'customer') {
+      await db
+        .update(contacts)
+        .set({ lifecycleStage: 'customer', updatedAt: new Date() })
+        .where(eq(contacts.id, row.contact.id));
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: 'contact.updated',
+        entityType: 'contact',
+        entityId: row.contact.id,
+        oldValues: { lifecycleStage: row.contact.lifecycleStage },
+        newValues: { lifecycleStage: 'customer' },
+      });
+    }
   }
 
   async history(
