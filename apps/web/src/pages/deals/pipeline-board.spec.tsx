@@ -7,6 +7,11 @@ import { PipelineBoardPage } from './pipeline-board';
 const mockApi = vi.fn();
 const mockNotify = vi.fn();
 
+vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
+  useNavigate: () => vi.fn(),
+}));
+
 vi.mock('../../lib/api', () => ({
   api: (...args: unknown[]) => mockApi(...args),
   hasScope: () => true,

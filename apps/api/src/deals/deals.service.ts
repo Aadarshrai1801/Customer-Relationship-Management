@@ -620,7 +620,13 @@ export class DealsService {
         entityType: 'deal',
         entityId: updated.id,
         oldValues: { stageId: row.stage.id, stageName: row.stage.name, status: row.deal.status },
-        newValues: { stageId: target.id, stageName: target.name, status },
+        newValues: {
+          stageId: target.id,
+          stageName: target.name,
+          status,
+          accountId: updated.accountId,
+          contactId: updated.contactId,
+        },
       });
       return { deal: await this.serializeById(db, auth, defs, updated.id), changed: true };
     });

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, hasScope, type DirectoryUser } from '../../lib/api';
 import { useAuth } from '../../lib/providers';
@@ -504,7 +505,11 @@ function DealCard({
         dragging ? 'opacity-40' : ''
       } ${deal.closeDateStatus === 'overdue' ? 'border-l-4 border-l-warning' : 'border-border'}`}
     >
-      <p className="text-xs font-semibold text-text-primary">{deal.name}</p>
+      <p className="text-xs font-semibold text-text-primary">
+        <Link to="/deals/$id" params={{ id: deal.id }} className="hover:underline">
+          {deal.name}
+        </Link>
+      </p>
       <p className="mt-0.5 text-[11px] text-text-secondary">
         {money(deal.amount, deal.currency)}
         {deal.currency !== deal.baseCurrency && (
