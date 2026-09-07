@@ -13,7 +13,8 @@ export interface TimelineItem {
     | 'contact_deleted'
     | 'contact_merged'
     | 'note_added'
-    | 'activity_logged';
+    | 'activity_logged'
+    | 'comment_added';
   occurredAt: Date;
   actor: { id: string | null; email: string | null };
   summary: string;
@@ -29,6 +30,7 @@ const TIMELINE_ACTIONS = [
   'contact.updated',
   'contact.deleted',
   'contact.merged',
+  'comment.created',
 ] as const;
 
 const ACTION_TO_TYPE: Record<(typeof TIMELINE_ACTIONS)[number], TimelineItem['type']> = {
@@ -36,11 +38,16 @@ const ACTION_TO_TYPE: Record<(typeof TIMELINE_ACTIONS)[number], TimelineItem['ty
   'contact.updated': 'contact_updated',
   'contact.deleted': 'contact_deleted',
   'contact.merged': 'contact_merged',
+  'comment.created': 'comment_added',
 };
 
 function summarize(action: string, oldValues: unknown, newValues: unknown): string {
   if (action === 'contact.created') return 'Contact created';
   if (action === 'contact.deleted') return 'Contact deleted';
+  if (action === 'comment.created') {
+    const preview = (newValues as { preview?: string } | null)?.preview;
+    return preview ? `Comment: ${preview}` : 'Comment added';
+  }
   if (action === 'contact.merged') {
     const loser = (newValues as { loserEmail?: string } | null)?.loserEmail;
     return loser ? `Merged duplicate contact ${loser}` : 'Merged a duplicate contact';

@@ -1,10 +1,10 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
-import { organizations, ssoConfigs } from '@nexus/db';
+import { organizations, ssoConfigs, type OrganizationSettings } from '@nexus/db';
 import { TenantDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
 import { AuditService, diffObjects } from '../audit/audit.service';
-import type { UpdateSecurityInput } from './org.schemas';
+import type { UpdateSecurityInput, UpdateSettingsInput } from './org.schemas';
 
 @Injectable()
 export class OrgService {
@@ -89,5 +89,59 @@ export class OrgService {
     });
     if (!updated) throw new Error('Failed to update workspace');
     return { id: updated.id, securitySettings: updated.securitySettings };
+  }
+
+  /**
+   * Module 8 (PRD 4.13): configurable attachment caps live in the generic
+   * org settings jsonb so no migration is needed for future caps.
+   */
+  async updateSettings(auth: AuthContext, input: UpdateSettingsInput): Promise<unknown> {
+    const [updated] = await this.tenantDb.tx(auth.org.id, async (db) => {
+      const [org] = await db.select().from(organizations).where(eq(organizations.id, auth.org.id));
+      if (!org) {
+        throw new NotFoundException({ message: 'Workspace not found', code: 'ORG_NOT_FOUND' });
+      }
+      const nextSettings: OrganizationSettings = {
+        ...(org.settings as OrganizationSettings),
+        ...(input.maxAttachmentBytes !== undefined
+          ? { maxAttachmentBytes: input.maxAttachmentBytes }
+          : {}),
+        ...(input.attachmentStorageCapBytes !== undefined
+          ? { attachmentStorageCapBytes: input.attachmentStorageCapBytes }
+          : {}),
+      };
+      const [next] = await db
+        .update(organizations)
+        .set({ settings: nextSettings, updatedAt: new Date() })
+        .where(eq(organizations.id, org.id))
+        .returning();
+      if (!next) throw new Error('Failed to update workspace');
+      const { oldValues, newValues } = diffObjects(
+        {
+          maxAttachmentBytes: (org.settings as OrganizationSettings).maxAttachmentBytes,
+          attachmentStorageCapBytes: (org.settings as OrganizationSettings)
+            .attachmentStorageCapBytes,
+        },
+        {
+          maxAttachmentBytes: nextSettings.maxAttachmentBytes,
+          attachmentStorageCapBytes: nextSettings.attachmentStorageCapBytes,
+        },
+      );
+      if (Object.keys(newValues).length > 0) {
+        await this.audit.record(db, {
+          orgId: org.id,
+          actorUserId: auth.user.id,
+          actorEmail: auth.user.email,
+          action: 'org.settings_updated',
+          entityType: 'organization',
+          entityId: org.id,
+          oldValues,
+          newValues,
+        });
+      }
+      return [next];
+    });
+    if (!updated) throw new Error('Failed to update workspace');
+    return { id: updated.id, settings: updated.settings };
   }
 }

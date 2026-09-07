@@ -13,6 +13,8 @@ import type {
 import { Badge, Button, Card, EmptyState, Field, Input, Skeleton } from '../../components/ui';
 import { Modal } from '../../components/modal';
 import { InlineEdit } from '../../components/inline-edit';
+import { CommentsThread } from '../../components/comments-thread';
+import { AttachmentsCard } from '../../components/attachments-card';
 import { CustomFieldsRenderer } from '../../components/custom-fields-renderer';
 import { useToast } from '../../components/toast';
 
@@ -486,6 +488,9 @@ export function DealDetailPage(): React.JSX.Element {
               canManage={canManage}
             />
           </Card>
+
+          <CommentsThread entityType="deal" entityId={deal.id} />
+          <AttachmentsCard entityType="deal" entityId={deal.id} />
         </div>
       </div>
 

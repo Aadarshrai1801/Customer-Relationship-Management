@@ -3,7 +3,12 @@ import type { Request } from 'express';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { RequireScopes } from '../rbac/require-scopes.decorator';
 import { OrgService } from './org.service';
-import { updateSecuritySchema, type UpdateSecurityInput } from './org.schemas';
+import {
+  updateSecuritySchema,
+  updateSettingsSchema,
+  type UpdateSecurityInput,
+  type UpdateSettingsInput,
+} from './org.schemas';
 
 function authOf(req: Request): NonNullable<Request['auth']> {
   if (!req.auth) throw new UnauthorizedException();
@@ -27,5 +32,14 @@ export class OrgController {
     @Body(new ZodValidationPipe(updateSecuritySchema)) body: unknown,
   ): Promise<unknown> {
     return this.org.updateSecurity(authOf(req), body as UpdateSecurityInput);
+  }
+
+  @RequireScopes('org:manage')
+  @Patch('settings')
+  async updateSettings(
+    @Req() req: Request,
+    @Body(new ZodValidationPipe(updateSettingsSchema)) body: unknown,
+  ): Promise<unknown> {
+    return this.org.updateSettings(authOf(req), body as UpdateSettingsInput);
   }
 }

@@ -64,6 +64,10 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
           'reports:read',
           'dashboards:read',
           'dashboards:manage',
+          'comments:read',
+          'comments:manage',
+          'attachments:read',
+          'attachments:manage',
           'notifications:read',
         ],
         {
@@ -97,6 +101,10 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
           'activities:read',
           'reports:read',
           'dashboards:read',
+          'comments:read',
+          'comments:manage',
+          'attachments:read',
+          'attachments:manage',
         ],
         {
           user: 'all',
@@ -133,6 +141,10 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
           'reports:read',
           'dashboards:read',
           'dashboards:manage',
+          'comments:read',
+          'comments:manage',
+          'attachments:read',
+          'attachments:manage',
         ],
         {
           user: 'own',
@@ -161,6 +173,8 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
           'activities:read',
           'reports:read',
           'dashboards:read',
+          'comments:read',
+          'attachments:read',
         ],
         {
           user: 'own',

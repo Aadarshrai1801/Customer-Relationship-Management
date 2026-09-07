@@ -20,6 +20,9 @@ export interface OrganizationSettings {
   locale: string;
   dateFormat: string;
   baseCurrency: string;
+  /** Module 8 (PRD 4.13): per-file upload cap; org-wide attachment bytes cap. */
+  maxAttachmentBytes?: number;
+  attachmentStorageCapBytes?: number;
 }
 
 export interface OrganizationSecuritySettings {
@@ -41,6 +44,8 @@ export const DEFAULT_ORGANIZATION_SETTINGS: OrganizationSettings = {
   locale: 'en-US',
   dateFormat: 'YYYY-MM-DD',
   baseCurrency: 'USD',
+  maxAttachmentBytes: 25 * 1024 * 1024,
+  attachmentStorageCapBytes: 10 * 1024 * 1024 * 1024,
 };
 
 export const DEFAULT_ORGANIZATION_SECURITY_SETTINGS: OrganizationSecuritySettings = {
@@ -294,6 +299,63 @@ export type EmailTemplate = typeof emailTemplates.$inferSelect;
 export type NewEmailTemplate = typeof emailTemplates.$inferInsert;
 export type Dashboard = typeof dashboards.$inferSelect;
 export type NewDashboard = typeof dashboards.$inferInsert;
+export type Comment = typeof comments.$inferSelect;
+export type NewComment = typeof comments.$inferInsert;
+export type Attachment = typeof attachments.$inferSelect;
+export type NewAttachment = typeof attachments.$inferInsert;
+
+/**
+ * Module 8 (PRD 4.13 P0): internal comments on contacts, deals, and
+ * tasks. mentionedUserIds captures @mention targets parsed at write
+ * time so mention notifications never depend on re-parsing body text.
+ * entityType is contact | deal | task; entity existence is validated
+ * in the API (no cross-table FK possible).
+ */
+export const comments = pgTable(
+  'comments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
+    entityType: text('entity_type').notNull(),
+    entityId: uuid('entity_id').notNull(),
+    body: text('body').notNull(),
+    mentionedUserIds: uuid('mentioned_user_ids').array().notNull().default([]),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_comments_entity').on(t.orgId, t.entityType, t.entityId)],
+);
+
+/**
+ * Module 8 (PRD 4.13 P0): file attachments on contacts, deals, and
+ * tasks. Bytes live under STORAGE_DIR/attachments keyed by storageKey;
+ * size caps are enforced in the API against org settings (default 25MB
+ * per file). No cross-table FK (see comments).
+ */
+export const attachments = pgTable(
+  'attachments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+    entityType: text('entity_type').notNull(),
+    entityId: uuid('entity_id').notNull(),
+    filename: text('filename').notNull(),
+    mimeType: text('mime_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    storageKey: text('storage_key').notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_attachments_entity').on(t.orgId, t.entityType, t.entityId)],
+);
 
 /**
  * Module 7 (PRD 4.8 P0): user-customizable dashboards. layout is an

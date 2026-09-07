@@ -80,7 +80,8 @@ export interface TimelineItem {
     | 'contact_deleted'
     | 'contact_merged'
     | 'note_added'
-    | 'activity_logged';
+    | 'activity_logged'
+    | 'comment_added';
   occurredAt: string;
   actor: { id: string | null; email: string | null };
   summary: string;
@@ -323,6 +324,33 @@ export interface EmailTemplate {
   name: string;
   subject: string;
   body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CommentEntityType = 'contact' | 'deal' | 'task';
+
+export interface SerializedComment {
+  id: string;
+  author: { id: string; name: string } | null;
+  authorId: string | null;
+  entityType: CommentEntityType;
+  entityId: string;
+  body: string;
+  mentionedUsers: Array<{ id: string; name: string; email: string }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SerializedAttachment {
+  id: string;
+  owner: { id: string; name: string } | null;
+  ownerId: string | null;
+  entityType: CommentEntityType;
+  entityId: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
   createdAt: string;
   updatedAt: string;
 }
