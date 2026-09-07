@@ -136,6 +136,30 @@ describe('TasksPage', () => {
     );
   });
 
+  it('creates a recurring task with a rule', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('Follow up on proposal');
+
+    await user.click(screen.getByRole('button', { name: '+ New Task' }));
+    await user.type(screen.getByLabelText('Title'), 'Weekly review');
+    await user.selectOptions(screen.getByLabelText('Repeats'), 'weekly');
+    await user.click(screen.getByRole('button', { name: 'Create Task' }));
+
+    await waitFor(() =>
+      expect(mockApi).toHaveBeenCalledWith(
+        '/tasks',
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.objectContaining({
+            title: 'Weekly review',
+            recurrence: { frequency: 'weekly', interval: 1 },
+          }),
+        }),
+      ),
+    );
+  });
+
   it('completes a task from the list', async () => {
     const user = userEvent.setup();
     renderPage();

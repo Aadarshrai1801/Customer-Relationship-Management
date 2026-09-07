@@ -77,6 +77,24 @@ export function PipelineBoardPage(): React.JSX.Element {
     enabled: activePipelineId !== null,
   });
 
+  // Rot flags (PRD 4.3 P1): best-effort overlay, never blocks the board.
+  const stalledQuery = useQuery({
+    queryKey: ['deals-stalled'],
+    queryFn: () =>
+      api<{ deals: Array<{ id: string; daysInactive: number }>; thresholdDays: number }>(
+        '/deals/stalled?limit=200',
+      ),
+    retry: false,
+    staleTime: 60_000,
+  });
+  const staleDaysById = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const entry of stalledQuery.data?.deals ?? []) {
+      map.set(entry.id, entry.daysInactive);
+    }
+    return map;
+  }, [stalledQuery.data]);
+
   const forecastQuery = useQuery({
     queryKey: ['deals-forecast', activePipelineId, ownerFilter, statusFilter],
     queryFn: () => {
@@ -392,6 +410,7 @@ export function PipelineBoardPage(): React.JSX.Element {
                       <DealCard
                         key={deal.id}
                         deal={deal}
+                        daysInactive={staleDaysById.get(deal.id) ?? null}
                         stages={activePipeline.stages}
                         canManage={canManage}
                         dragging={draggingId === deal.id}
@@ -476,6 +495,7 @@ export function PipelineBoardPage(): React.JSX.Element {
 
 function DealCard({
   deal,
+  daysInactive,
   stages,
   canManage,
   dragging,
@@ -484,6 +504,7 @@ function DealCard({
   onMove,
 }: {
   deal: SerializedDeal;
+  daysInactive: number | null;
   stages: PipelineWithStages['stages'];
   canManage: boolean;
   dragging: boolean;
@@ -503,7 +524,9 @@ function DealCard({
       onDragEnd={onDragEnd}
       className={`rounded-lg border bg-surface p-3 shadow-subtle transition-opacity ${
         dragging ? 'opacity-40' : ''
-      } ${deal.closeDateStatus === 'overdue' ? 'border-l-4 border-l-warning' : 'border-border'}`}
+      } ${deal.closeDateStatus === 'overdue' ? 'border-l-4 border-l-warning' : 'border-border'} ${
+        daysInactive !== null ? 'border-amber-500/60' : ''
+      }`}
     >
       <p className="text-xs font-semibold text-text-primary">
         <Link to="/deals/$id" params={{ id: deal.id }} className="hover:underline">
@@ -523,6 +546,7 @@ function DealCard({
         </span>
         {deal.closeDateStatus === 'overdue' && <Badge tone="warning">overdue</Badge>}
         {deal.closeDateStatus === 'due-soon' && <Badge tone="neutral">due soon</Badge>}
+        {daysInactive !== null && <Badge tone="warning">stale {daysInactive}d</Badge>}
       </div>
       {deal.owner && <p className="mt-1 text-[11px] text-text-secondary">{deal.owner.name}</p>}
       {canManage && (

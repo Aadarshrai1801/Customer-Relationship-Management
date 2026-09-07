@@ -404,6 +404,11 @@ export function DealDetailPage(): React.JSX.Element {
                   <option value="commit">Commit</option>
                 </select>
               </div>
+              <CompetitorPicker
+                dealId={deal.id}
+                competitor={deal.competitor as { id: string; name: string } | null}
+                canManage={canManage}
+              />
             </div>
           </Card>
 
@@ -603,6 +608,111 @@ function formatDuration(totalSeconds: number): string {
   if (totalSeconds < 3600) return `${Math.floor(totalSeconds / 60)}m`;
   if (totalSeconds < 86400) return `${Math.floor(totalSeconds / 3600)}h`;
   return `${Math.floor(totalSeconds / 86400)}d`;
+}
+
+function CompetitorPicker({
+  dealId,
+  competitor,
+  canManage,
+}: {
+  dealId: string;
+  competitor: { id: string; name: string } | null;
+  canManage: boolean;
+}): React.JSX.Element {
+  const { notify } = useToast();
+  const queryClient = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState('');
+
+  const competitorsQuery = useQuery({
+    queryKey: ['competitors'],
+    queryFn: () => api<Array<{ id: string; name: string }>>('/competitors'),
+  });
+  const options = competitorsQuery.data ?? [];
+
+  async function refreshDeal(): Promise<void> {
+    await queryClient.invalidateQueries({ queryKey: ['deal', dealId] });
+    await queryClient.invalidateQueries({ queryKey: ['deals-board'] });
+  }
+
+  async function assign(id: string | null): Promise<void> {
+    try {
+      await api(`/deals/${dealId}`, { method: 'PATCH', body: { competitorId: id } });
+      await queryClient.invalidateQueries({ queryKey: ['competitors'] });
+      await refreshDeal();
+      notify('success', 'Competitor updated');
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Update failed');
+    }
+  }
+
+  async function addNew(e: React.FormEvent): Promise<void> {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    try {
+      const created = await api<{ competitor: { id: string; name: string } }>('/competitors', {
+        method: 'POST',
+        body: { name: newName.trim() },
+      });
+      setNewName('');
+      setAdding(false);
+      await queryClient.invalidateQueries({ queryKey: ['competitors'] });
+      await assign(created.competitor.id);
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Could not add competitor');
+    }
+  }
+
+  return (
+    <div>
+      <label
+        htmlFor="deal-competitor"
+        className="mb-1 block text-xs font-medium text-text-secondary"
+      >
+        Competitor
+      </label>
+      <select
+        id="deal-competitor"
+        value={competitor?.id ?? ''}
+        disabled={!canManage}
+        onChange={(e) => void assign(e.target.value || null)}
+        className="h-9 w-full rounded border border-border bg-surface px-2 text-xs"
+      >
+        <option value="">None</option>
+        {options.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+        {competitor && !options.some((c) => c.id === competitor.id) && (
+          <option value={competitor.id}>{competitor.name}</option>
+        )}
+      </select>
+      {canManage &&
+        (adding ? (
+          <form onSubmit={(e) => void addNew(e)} className="mt-1 flex gap-1">
+            <Input
+              aria-label="New competitor name"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Rival Inc"
+              className="h-8 text-xs"
+            />
+            <Button type="submit" variant="secondary" className="h-8 shrink-0 px-2 text-xs">
+              Add
+            </Button>
+          </form>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="mt-1 text-[11px] text-accent hover:underline"
+          >
+            + New competitor
+          </button>
+        ))}
+    </div>
+  );
 }
 
 function LineItemsCard({

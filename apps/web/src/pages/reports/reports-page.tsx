@@ -110,6 +110,7 @@ const WIDGET_TYPES = [
   { type: 'conversion-funnel', label: 'Conversion funnel' },
   { type: 'overdue-tasks', label: 'Overdue tasks' },
   { type: 'recent-activities', label: 'Recent activities' },
+  { type: 'stalled-deals', label: 'Stalled deals' },
 ] as const;
 
 type ReportTab = 'forecast' | 'pipeline' | 'activity' | 'conversion' | 'dashboards';
@@ -691,6 +692,36 @@ function DashboardWidgetView({ widget }: { widget: DashboardWidget }): React.JSX
                 <span className="italic text-text-secondary">Nothing overdue.</span>
               ) : (
                 payload.tasks.slice(0, 5).map((t) => <span key={t.id}>• {t.title}</span>)
+              )}
+            </div>
+          )}
+        />
+      </WidgetCard>
+    );
+  }
+
+  if (type === 'stalled-deals') {
+    return (
+      <WidgetCard title={title}>
+        <WidgetQuery
+          queryKey={['widget-stalled']}
+          url="/deals/stalled?limit=5"
+          render={(payload: {
+            deals: Array<{ id: string; name: string; daysInactive: number }>;
+            thresholdDays: number;
+          }) => (
+            <div className="flex flex-col gap-1 text-xs">
+              {payload.deals.length === 0 ? (
+                <span className="italic text-text-secondary">
+                  No deals inactive beyond {payload.thresholdDays} days.
+                </span>
+              ) : (
+                payload.deals.map((d) => (
+                  <span key={d.id}>
+                    • {d.name}{' '}
+                    <span className="font-semibold text-warning">{d.daysInactive}d inactive</span>
+                  </span>
+                ))
               )}
             </div>
           )}

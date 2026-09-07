@@ -96,6 +96,7 @@ const DEAL = {
   lossReason: null,
   closedAt: null,
   forecastCategory: 'pipeline',
+  competitor: null,
   customFields: {},
   computedFields: {},
   createdAt: new Date().toISOString(),
@@ -105,6 +106,7 @@ const DEAL = {
 function setupApi(overrides?: {
   lineItems?: unknown[];
   products?: unknown[];
+  competitors?: unknown[];
   onDelete?: () => void;
 }) {
   mockApi.mockImplementation((url: string, init?: { method?: string }) => {
@@ -182,6 +184,7 @@ function setupApi(overrides?: {
     if (url === '/users') return Promise.resolve({ users: [] });
     if (url.startsWith('/accounts')) return Promise.resolve({ accounts: [] });
     if (url.startsWith('/contacts')) return Promise.resolve({ contacts: [] });
+    if (url === '/competitors') return Promise.resolve(overrides?.competitors ?? []);
     if (url.includes('/stage')) return Promise.resolve({ deal: DEAL, changed: true });
     if (url === '/deals/deal-1' && init?.method === 'DELETE') {
       overrides?.onDelete?.();
@@ -321,6 +324,27 @@ describe('DealDetailPage', () => {
         expect.objectContaining({
           method: 'PATCH',
           body: expect.objectContaining({ forecastCategory: 'commit' }),
+        }),
+      ),
+    );
+  });
+
+  it('assigns a competitor through PATCH', async () => {
+    const user = userEvent.setup();
+    setupApi({ competitors: [{ id: 'comp-1', name: 'Acme Rival' }] });
+    renderDetail();
+    await screen.findByRole('heading', { name: 'Acme Expansion' });
+    await screen.findByRole('option', { name: 'Acme Rival' });
+
+    const select = screen.getByLabelText('Competitor') as HTMLSelectElement;
+    await user.selectOptions(select, 'comp-1');
+
+    await waitFor(() =>
+      expect(mockApi).toHaveBeenCalledWith(
+        '/deals/deal-1',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: expect.objectContaining({ competitorId: 'comp-1' }),
         }),
       ),
     );

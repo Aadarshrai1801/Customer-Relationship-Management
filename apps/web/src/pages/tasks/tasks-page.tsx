@@ -198,6 +198,9 @@ export function TasksPage(): React.JSX.Element {
                     {task.overdue && <Badge tone="warning">overdue</Badge>}
                     {task.reminderDue && <Badge tone="info">reminder</Badge>}
                     <Badge tone="neutral">{task.priority}</Badge>
+                    {task.recurrence && (
+                      <Badge tone="info">repeats {task.recurrence.frequency}</Badge>
+                    )}
                   </div>
                   <p className="mt-1 text-xs text-text-secondary">
                     Due {formatDate(task.dueAt)}
@@ -288,6 +291,7 @@ function CreateTaskModal({
   const [dueAt, setDueAt] = useState('');
   const [remindAt, setRemindAt] = useState('');
   const [priority, setPriority] = useState('normal');
+  const [recurrence, setRecurrence] = useState('none');
   const [error, setError] = useState<string | null>(null);
 
   const createMutation = useMutation({
@@ -296,6 +300,7 @@ function CreateTaskModal({
       const body: Record<string, unknown> = { title: title.trim(), priority };
       if (dueAt) body['dueAt'] = new Date(dueAt).toISOString();
       if (remindAt) body['remindAt'] = new Date(remindAt).toISOString();
+      if (recurrence !== 'none') body['recurrence'] = { frequency: recurrence, interval: 1 };
       return api('/tasks', { method: 'POST', body });
     },
     onSuccess: () => {
@@ -303,6 +308,7 @@ function CreateTaskModal({
       setDueAt('');
       setRemindAt('');
       setPriority('normal');
+      setRecurrence('none');
       setError(null);
       onClose();
       onCreated();
@@ -365,6 +371,19 @@ function CreateTaskModal({
             <option value="low">Low</option>
             <option value="normal">Normal</option>
             <option value="high">High</option>
+          </select>
+        </Field>
+        <Field label="Repeats" htmlFor="new-task-recurrence">
+          <select
+            id="new-task-recurrence"
+            value={recurrence}
+            onChange={(e) => setRecurrence(e.target.value)}
+            className="h-9 rounded border border-border bg-surface px-2 text-xs"
+          >
+            <option value="none">Does not repeat</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
           </select>
         </Field>
         <div className="flex justify-end gap-2">

@@ -199,6 +199,7 @@ export interface SerializedDeal {
   lossReason: string | null;
   closedAt: string | null;
   forecastCategory: 'pipeline' | 'best_case' | 'commit';
+  competitor: { id: string; name: string } | null;
   customFields: Record<string, unknown>;
   computedFields: Record<string, unknown>;
   createdAt: string;
@@ -270,6 +271,7 @@ export interface SerializedTask {
   remindAt: string | null;
   reminderSentAt: string | null;
   completedAt: string | null;
+  recurrence: { frequency: string; interval: number } | null;
   overdue: boolean;
   reminderDue: boolean;
   createdAt: string;
