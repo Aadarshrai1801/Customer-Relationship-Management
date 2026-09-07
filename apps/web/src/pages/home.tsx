@@ -1,9 +1,17 @@
 import { Link } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../lib/providers';
+import { api } from '../lib/api';
 import { Badge, Card } from '../components/ui';
+import type { OnboardingStatus } from './welcome';
 
 export function HomePage(): React.JSX.Element {
   const { user, org } = useAuth();
+  const statusQuery = useQuery({
+    queryKey: ['onboarding-status'],
+    queryFn: () => api<OnboardingStatus>('/onboarding/status'),
+  });
+  const showGettingStarted = statusQuery.data !== undefined && statusQuery.data.complete === false;
 
   return (
     <>
@@ -14,6 +22,16 @@ export function HomePage(): React.JSX.Element {
         </p>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
+        {showGettingStarted && (
+          <Card
+            title="Getting started"
+            description={`${statusQuery.data?.doneCount ?? 0} of ${statusQuery.data?.total ?? 0} setup steps done.`}
+          >
+            <Link to="/welcome" className="text-sm font-semibold text-accent hover:underline">
+              Continue setup →
+            </Link>
+          </Card>
+        )}
         <Card title="Your access" description="Role and session status for this workspace.">
           <dl className="flex flex-col gap-2 text-sm">
             <div className="flex justify-between gap-4">

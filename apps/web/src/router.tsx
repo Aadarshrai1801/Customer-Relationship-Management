@@ -15,6 +15,7 @@ import { ResetPasswordPage } from './pages/reset-password';
 import { AcceptInvitePage } from './pages/accept-invite';
 import { SsoErrorPage, SsoSuccessPage } from './pages/sso';
 import { HomePage } from './pages/home';
+import { WelcomePage } from './pages/welcome';
 import { ProfilePage } from './pages/settings/profile';
 import { SecurityPage } from './pages/settings/security';
 import { UsersPage } from './pages/settings/users';
@@ -72,6 +73,12 @@ const homeRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/',
   component: HomePage,
+});
+
+const welcomeRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/welcome',
+  component: WelcomePage,
 });
 
 // Module 4 Routes
@@ -250,6 +257,7 @@ const ssoErrorRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   protectedRoute.addChildren([
     homeRoute,
+    welcomeRoute,
     dealsRoute,
     dealDetailRoute,
     tasksRoute,
