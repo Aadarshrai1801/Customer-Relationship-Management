@@ -72,6 +72,7 @@ export const createActivitySchema = z
 export const listActivitiesQuerySchema = z
   .object({
     type: z.enum(ACTIVITY_TYPES).optional(),
+    direction: z.enum(['inbound', 'outbound']).optional(),
     ownerId: z.string().uuid().optional(),
     contactId: z.string().uuid().optional(),
     accountId: z.string().uuid().optional(),

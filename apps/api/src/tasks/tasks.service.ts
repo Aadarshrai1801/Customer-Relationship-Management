@@ -68,6 +68,9 @@ export interface SerializedActivity {
   externalId: string | null;
   syncStatus: string;
   conflictFlag: boolean;
+  direction: string;
+  senderEmail: string | null;
+  recipientEmails: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -661,6 +664,7 @@ export class TasksService {
         conditions.push(eq(activities.ownerId, auth.user.id));
       }
       if (query.type) conditions.push(eq(activities.type, query.type));
+      if (query.direction) conditions.push(eq(activities.direction, query.direction));
       if (query.ownerId) {
         if (!canSeeAll && query.ownerId !== auth.user.id) {
           return { activities: [], nextCursor: null };
@@ -847,6 +851,9 @@ export class TasksService {
       externalId: activity.externalId,
       syncStatus: activity.syncStatus,
       conflictFlag: activity.conflictFlag,
+      direction: activity.direction,
+      senderEmail: activity.senderEmail,
+      recipientEmails: (activity.recipientEmails ?? []) as string[],
       createdAt: activity.createdAt,
       updatedAt: activity.updatedAt,
     };

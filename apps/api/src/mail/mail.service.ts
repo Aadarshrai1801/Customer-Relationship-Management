@@ -8,7 +8,10 @@ export class MailService {
   private readonly webOrigin: string;
 
   constructor() {
-    const smtpUrl = (process.env.SMTP_URL ?? 'smtp://127.0.0.1:1025').replace('localhost:1025', '127.0.0.1:1025');
+    const smtpUrl = (process.env.SMTP_URL ?? 'smtp://127.0.0.1:1025').replace(
+      'localhost:1025',
+      '127.0.0.1:1025',
+    );
     this.transporter = nodemailer.createTransport(smtpUrl);
     this.from = process.env.MAIL_FROM ?? 'Nexus CRM <noreply@nexus.local>';
     this.webOrigin = (process.env.WEB_ORIGIN ?? 'http://localhost:5173').split(',')[0]!;
@@ -69,6 +72,22 @@ export class MailService {
         `Your import of ${stats.total} ${entityType} rows finished: ` +
         `${stats.created} created, ${stats.skipped} skipped, ${stats.failed} failed.`,
     });
+  }
+
+  /**
+   * Generic rep-composed send used by the emails module. Returns the
+   * provider message-id so the caller can log it for dedup.
+   */
+  async sendEmail(params: { to: string; subject: string; text: string }): Promise<string> {
+    const info = await this.transporter.sendMail({
+      from: this.from,
+      to: params.to,
+      subject: params.subject,
+      text: params.text,
+    });
+    return typeof info?.messageId === 'string' && info.messageId
+      ? info.messageId
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}@nexus.local`;
   }
 
   async sendLeadAssignedNotification(
