@@ -25,6 +25,8 @@ export interface OrganizationSettings {
   attachmentStorageCapBytes?: number;
   /** Module 12 (PRD 4.3 P1): rot threshold in days (default 14). */
   staleDealDays?: number;
+  /** Module 13 (PRD 4.5 P1): open/click tracking toggle (default true). */
+  emailTrackingEnabled?: boolean;
 }
 
 export interface OrganizationSecuritySettings {
@@ -314,6 +316,142 @@ export type NewWorkflow = typeof workflows.$inferInsert;
 export type WorkflowRun = typeof workflowRuns.$inferSelect;
 export type Competitor = typeof competitors.$inferSelect;
 export type NewCompetitor = typeof competitors.$inferInsert;
+export type NotificationPreference = typeof notificationPreferences.$inferSelect;
+export type EmailTrackingEvent = typeof emailTrackingEvents.$inferSelect;
+export type Sequence = typeof sequences.$inferSelect;
+export type SequenceEnrollment = typeof sequenceEnrollments.$inferSelect;
+export type Quote = typeof quotes.$inferSelect;
+
+/**
+ * Module 13 (PRD 4.16 P1): per-user channel preferences per notification
+ * type. channels is a subset of { inapp, email }; absent rows mean all
+ * channels on. Digest/mention/task paths all consult this table.
+ */
+export const notificationPreferences = pgTable(
+  'notification_preferences',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    type: text('type').notNull(),
+    channels: text('channels').array().notNull().default(['inapp', 'email']),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uq_notification_prefs').on(t.orgId, t.userId, t.type)],
+);
+
+/**
+ * Module 13 (PRD 4.5 P1): open/click tracking events for outbound mail.
+ * Privacy caveat (PRD): pixels undercount under Apple Mail Privacy
+ * Protection — counts are best-effort signals, never exact reads.
+ */
+export const emailTrackingEvents = pgTable(
+  'email_tracking_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    activityId: uuid('activity_id')
+      .notNull()
+      .references(() => activities.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    url: text('url'),
+    userAgent: text('user_agent'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_email_tracking_activity').on(t.orgId, t.activityId, t.createdAt)],
+);
+
+/**
+ * Module 13 (PRD 4.5 P1): email sequences with per-contact enrollment.
+ * steps: [{ kind: 'wait', days } | { kind: 'send_email', templateId?,
+ * subject?, body? }]. A detected reply auto-pauses the enrollment.
+ */
+export const sequences = pgTable(
+  'sequences',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    steps: jsonb('steps').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_sequences_org_active').on(t.orgId, t.isActive)],
+);
+
+export const sequenceEnrollments = pgTable(
+  'sequence_enrollments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    sequenceId: uuid('sequence_id')
+      .notNull()
+      .references(() => sequences.id, { onDelete: 'cascade' }),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id, { onDelete: 'cascade' }),
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+    status: text('status').notNull().default('active'),
+    currentStep: integer('current_step').notNull().default(0),
+    nextRunAt: timestamp('next_run_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_enrollments_due').on(t.orgId, t.status, t.nextRunAt)],
+);
+
+/**
+ * Module 13 (PRD 4.3 P1): quotes snapshotting deal line items. Acceptance
+ * is recorded with name+timestamp+IP as the e-signature integration
+ * point (DocuSign adapter slots in where the stub signs).
+ */
+export const quotes = pgTable(
+  'quotes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    dealId: uuid('deal_id')
+      .notNull()
+      .references(() => deals.id, { onDelete: 'cascade' }),
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+    number: text('number').notNull(),
+    lines: jsonb('lines').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    subtotal: numeric('subtotal', { precision: 19, scale: 2 }).notNull(),
+    discountTotal: numeric('discount_total', { precision: 19, scale: 2 }).notNull().default('0'),
+    taxTotal: numeric('tax_total', { precision: 19, scale: 2 }).notNull().default('0'),
+    total: numeric('total', { precision: 19, scale: 2 }).notNull(),
+    currency: text('currency').notNull().default('USD'),
+    validUntil: timestamp('valid_until', { withTimezone: true }),
+    status: text('status').notNull().default('draft'),
+    publicToken: text('public_token').notNull(),
+    signature: jsonb('signature').$type<Record<string, unknown>>(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ix_quotes_org_deal').on(t.orgId, t.dealId),
+    uniqueIndex('uq_quotes_org_number').on(t.orgId, t.number),
+    uniqueIndex('uq_quotes_token').on(t.publicToken),
+  ],
+);
 
 /**
  * Module 12 (PRD 4.3 P1): named-competitor catalog so win/loss reporting
@@ -1162,6 +1300,10 @@ export const activities = pgTable(
     externalUpdatedAt: timestamp('external_updated_at', { withTimezone: true }),
     syncStatus: text('sync_status').notNull().default('active'),
     conflictFlag: boolean('conflict_flag').notNull().default(false),
+    // Module 13: reply threading + call duration (PRD 4.5/4.4 P1).
+    // No FK (same entityId convention as comments/attachments links).
+    replyToId: uuid('reply_to_id'),
+    durationSeconds: integer('duration_seconds'),
     // Module 6 (PRD 4.5): email addressing. direction is inbound | outbound.
     direction: text('direction').notNull().default('inbound'),
     senderEmail: text('sender_email'),
