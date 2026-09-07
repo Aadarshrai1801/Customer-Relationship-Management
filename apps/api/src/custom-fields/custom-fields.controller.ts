@@ -23,7 +23,9 @@ import {
   type UpdateFieldInput,
 } from './custom-fields.schemas';
 
-const listQuerySchema = z.object({ entityType: z.enum(['contact', 'account', 'lead']) }).strict();
+const listQuerySchema = z
+  .object({ entityType: z.enum(['contact', 'account', 'lead', 'deal']) })
+  .strict();
 
 function authOf(req: Request): NonNullable<Request['auth']> {
   if (!req.auth) throw new UnauthorizedException();
@@ -40,7 +42,7 @@ export class CustomFieldsController {
     @Req() req: Request,
     @Query(new ZodValidationPipe(listQuerySchema)) query: unknown,
   ): Promise<unknown> {
-    const { entityType } = query as { entityType: 'contact' | 'account' | 'lead' };
+    const { entityType } = query as { entityType: 'contact' | 'account' | 'lead' | 'deal' };
     return this.fields.list(authOf(req), entityType);
   }
 

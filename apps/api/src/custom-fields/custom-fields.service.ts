@@ -16,7 +16,7 @@ import type { CreateFieldInput, UpdateFieldInput } from './custom-fields.schemas
 
 export interface SerializedField {
   id: string;
-  entityType: 'contact' | 'account' | 'lead';
+  entityType: 'contact' | 'account' | 'lead' | 'deal';
   key: string;
   label: string;
   type: CustomFieldType;
@@ -65,7 +65,7 @@ export class CustomFieldsService {
 
   async list(
     auth: AuthContext,
-    entityType: 'contact' | 'account' | 'lead',
+    entityType: 'contact' | 'account' | 'lead' | 'deal',
   ): Promise<SerializedField[]> {
     return this.tenantDb.tx(auth.org.id, async (db) => {
       const rows = await db
@@ -84,7 +84,7 @@ export class CustomFieldsService {
   async loadDefinitions(
     db: NexusDb,
     orgId: string,
-    entityType: 'contact' | 'account' | 'lead',
+    entityType: 'contact' | 'account' | 'lead' | 'deal',
   ): Promise<FieldDefinition[]> {
     const rows = await db
       .select()

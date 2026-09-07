@@ -9,7 +9,7 @@ const baseFields = {
 
 export const createFieldSchema = z
   .object({
-    entityType: z.enum(['contact', 'account', 'lead']),
+    entityType: z.enum(['contact', 'account', 'lead', 'deal']),
     key: z.string().trim().toLowerCase().regex(keyPattern, 'Key must be snake_case'),
     type: z.enum([
       'text',

@@ -415,7 +415,7 @@ export const customFieldDefinitions = pgTable(
     orgId: uuid('org_id')
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
-    entityType: text('entity_type').$type<'contact' | 'account' | 'lead'>().notNull(),
+    entityType: text('entity_type').$type<'contact' | 'account' | 'lead' | 'deal'>().notNull(),
     key: text('key').notNull(),
     label: text('label').notNull(),
     type: text('type').$type<CustomFieldType>().notNull(),
