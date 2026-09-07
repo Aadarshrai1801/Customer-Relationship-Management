@@ -13,6 +13,7 @@ const NAV: Array<{ to: string; label: string; scope?: string }> = [
   { to: '/deals', label: 'Deals', scope: 'deals:read' },
   { to: '/tasks', label: 'Tasks', scope: 'tasks:read' },
   { to: '/emails', label: 'Emails', scope: 'activities:read' },
+  { to: '/reports', label: 'Reports', scope: 'reports:read' },
   { to: '/contacts', label: 'Contacts', scope: 'contacts:read' },
   { to: '/accounts', label: 'Accounts', scope: 'accounts:read' },
   { to: '/duplicates', label: 'Duplicates', scope: 'contacts:read' },

@@ -197,6 +197,7 @@ export interface SerializedDeal {
   status: DealStatus;
   lossReason: string | null;
   closedAt: string | null;
+  forecastCategory: 'pipeline' | 'best_case' | 'commit';
   customFields: Record<string, unknown>;
   computedFields: Record<string, unknown>;
   createdAt: string;

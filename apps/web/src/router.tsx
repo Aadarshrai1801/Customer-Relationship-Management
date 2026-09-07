@@ -36,6 +36,7 @@ import { PipelineBoardPage } from './pages/deals/pipeline-board';
 import { DealDetailPage } from './pages/deals/deal-detail';
 import { TasksPage } from './pages/tasks/tasks-page';
 import { EmailsPage } from './pages/emails/emails-page';
+import { ReportsPage } from './pages/reports/reports-page';
 import { WebToLeadPage } from './pages/settings/web-to-lead';
 import { LeadRoutingPage } from './pages/settings/lead-routing';
 
@@ -97,6 +98,13 @@ const emailsRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/emails',
   component: EmailsPage,
+});
+
+// Module 7 Routes
+const reportsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/reports',
+  component: ReportsPage,
 });
 
 // Module 3 Routes
@@ -246,6 +254,7 @@ const routeTree = rootRoute.addChildren([
     dealDetailRoute,
     tasksRoute,
     emailsRoute,
+    reportsRoute,
     leadsRoute,
     leadDetailRoute,
     contactsRoute,

@@ -383,6 +383,25 @@ export function DealDetailPage(): React.JSX.Element {
                   ))}
                 </select>
               </div>
+              <div>
+                <label
+                  htmlFor="deal-forecast-category"
+                  className="mb-1 block text-xs font-medium text-text-secondary"
+                >
+                  Forecast category
+                </label>
+                <select
+                  id="deal-forecast-category"
+                  value={String(deal.forecastCategory ?? 'pipeline')}
+                  disabled={!canManage}
+                  onChange={(e) => updateMutation.mutate({ forecastCategory: e.target.value })}
+                  className="h-9 w-full rounded border border-border bg-surface px-2 text-xs"
+                >
+                  <option value="pipeline">Pipeline</option>
+                  <option value="best_case">Best case</option>
+                  <option value="commit">Commit</option>
+                </select>
+              </div>
             </div>
           </Card>
 

@@ -95,6 +95,7 @@ const DEAL = {
   status: 'open',
   lossReason: null,
   closedAt: null,
+  forecastCategory: 'pipeline',
   customFields: {},
   computedFields: {},
   createdAt: new Date().toISOString(),
@@ -301,6 +302,25 @@ describe('DealDetailPage', () => {
         expect.objectContaining({
           method: 'PATCH',
           body: expect.objectContaining({ name: 'Acme Expansion Plus' }),
+        }),
+      ),
+    );
+  });
+
+  it('changes the forecast category through PATCH', async () => {
+    const user = userEvent.setup();
+    renderDetail();
+    await screen.findByRole('heading', { name: 'Acme Expansion' });
+
+    const select = screen.getByLabelText('Forecast category') as HTMLSelectElement;
+    await user.selectOptions(select, 'commit');
+
+    await waitFor(() =>
+      expect(mockApi).toHaveBeenCalledWith(
+        '/deals/deal-1',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: expect.objectContaining({ forecastCategory: 'commit' }),
         }),
       ),
     );
