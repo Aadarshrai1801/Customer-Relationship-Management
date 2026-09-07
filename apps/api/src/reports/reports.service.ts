@@ -13,6 +13,7 @@ import {
 } from '@nexus/db';
 import { TenantDb, type NexusDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
+import { fieldRule } from '../rbac/permissions';
 import { resolveBaseCurrency } from '../pipelines/currency';
 import type {
   ActivityReportQuery,
@@ -67,7 +68,11 @@ export class ReportsService {
   async forecast(
     auth: AuthContext,
     query: ForecastReportQuery,
-  ): Promise<{ data: unknown; meta: { cached: boolean; generatedAt: string } }> {
+  ): Promise<{
+    data: unknown;
+    meta: { cached: boolean; generatedAt: string; amountsRedacted?: boolean };
+  }> {
+    const showAmounts = this.dealAmountsVisible(auth);
     return this.cached(
       auth,
       ['forecast', query],
@@ -158,7 +163,9 @@ export class ReportsService {
             }));
             const stageById = new Map(stageRollup.map((r) => [r.stage.id, r]));
             for (const row of rows) {
-              const base = toNumber(row.deal.baseAmount);
+              // Field-level redaction (PRD 4.12): without amount visibility
+              // every money input is zero, so counts survive but values don't.
+              const base = showAmounts ? toNumber(row.deal.baseAmount) : 0;
               const prob = row.deal.probability ?? probByStage.get(row.deal.stageId) ?? 0;
               const weighted = round2((base * prob) / 100);
               const category = row.deal.forecastCategory;
@@ -216,13 +223,18 @@ export class ReportsService {
         });
       },
       query.refresh === true,
+      { amountsRedacted: !showAmounts },
     );
   }
 
   async pipeline(
     auth: AuthContext,
     query: PipelineReportQuery,
-  ): Promise<{ data: unknown; meta: { cached: boolean; generatedAt: string } }> {
+  ): Promise<{
+    data: unknown;
+    meta: { cached: boolean; generatedAt: string; amountsRedacted?: boolean };
+  }> {
+    const showAmounts = this.dealAmountsVisible(auth);
     return this.cached(
       auth,
       ['pipeline', query],
@@ -283,7 +295,9 @@ export class ReportsService {
               const bucket = entry[row.status as 'open' | 'won' | 'lost'];
               if (!bucket) continue;
               bucket.count += 1;
-              bucket.baseAmount = round2(bucket.baseAmount + toNumber(row.baseAmount));
+              bucket.baseAmount = round2(
+                bucket.baseAmount + (showAmounts ? toNumber(row.baseAmount) : 0),
+              );
             }
             blocks.push({
               pipeline: { id: pipe.id, name: pipe.name, slug: pipe.slug },
@@ -294,6 +308,7 @@ export class ReportsService {
         });
       },
       query.refresh === true,
+      { amountsRedacted: !showAmounts },
     );
   }
 
@@ -393,7 +408,11 @@ export class ReportsService {
   async conversion(
     auth: AuthContext,
     query: ConversionReportQuery,
-  ): Promise<{ data: unknown; meta: { cached: boolean; generatedAt: string } }> {
+  ): Promise<{
+    data: unknown;
+    meta: { cached: boolean; generatedAt: string; amountsRedacted?: boolean };
+  }> {
+    const showAmounts = this.dealAmountsVisible(auth);
     return this.cached(
       auth,
       ['conversion', query],
@@ -434,7 +453,7 @@ export class ReportsService {
           const won = dealRows.filter((d) => d.status === 'won');
           const lost = dealRows.filter((d) => d.status === 'lost');
           const open = dealRows.filter((d) => d.status === 'open');
-          const wonBase = won.reduce((sum, d) => sum + toNumber(d.baseAmount), 0);
+          const wonBase = showAmounts ? won.reduce((sum, d) => sum + toNumber(d.baseAmount), 0) : 0;
           return {
             from: query.from ?? null,
             to: query.to ?? null,
@@ -459,6 +478,7 @@ export class ReportsService {
         });
       },
       query.refresh === true,
+      { amountsRedacted: !showAmounts },
     );
   }
 
@@ -487,6 +507,18 @@ export class ReportsService {
     return (auth.role.permissions?.recordAccess?.[entity] ?? 'own') === 'all';
   }
 
+  /**
+   * PRD 4.12: field-level rules apply to the reporting layer too — a role
+   * that may not read deal amounts gets counts but zeroed money (never a
+   * back door around the record endpoints, which strip the same fields).
+   */
+  private dealAmountsVisible(auth: AuthContext): boolean {
+    return (
+      fieldRule(auth.role.permissions, 'deal', 'amount') !== 'none' &&
+      fieldRule(auth.role.permissions, 'deal', 'baseAmount') !== 'none'
+    );
+  }
+
   private async orgBaseCurrency(db: NexusDb, orgId: string): Promise<string> {
     const [org] = await db
       .select({ settings: organizations.settings })
@@ -500,22 +532,32 @@ export class ReportsService {
     parts: [string, unknown],
     compute: () => Promise<T>,
     bypass: boolean,
-  ): Promise<{ data: T; meta: { cached: boolean; generatedAt: string } }> {
-    // The refresh flag bypasses the cache but must not fragment it.
+    extraMeta: Record<string, unknown> = {},
+  ): Promise<{
+    data: T;
+    meta: { cached: boolean; generatedAt: string; amountsRedacted?: boolean };
+  }> {
+    // The refresh flag bypasses the cache but must not fragment it. The
+    // caller's permissions join the key so a mid-window role change
+    // cannot serve another visibility level's numbers.
     const { refresh: _refresh, ...keyParams } = (parts[1] ?? {}) as Record<string, unknown>;
     void _refresh;
-    const key = `${auth.org.id}|${parts[0]}|${JSON.stringify(keyParams)}|${auth.user.id}`;
+    const key = `${auth.org.id}|${parts[0]}|${JSON.stringify(keyParams)}|${auth.user.id}|${JSON.stringify(auth.role.permissions)}`;
     if (!bypass) {
       const hit = this.cache.get(key);
       if (hit && Date.now() - hit.at < REPORT_CACHE_TTL_MS) {
         return {
           data: hit.body as T,
-          meta: { cached: true, generatedAt: new Date(hit.at).toISOString() },
+          meta: {
+            cached: true,
+            generatedAt: new Date(hit.at).toISOString(),
+            ...extraMeta,
+          },
         };
       }
     }
     const data = await compute();
     this.cache.set(key, { at: Date.now(), body: data });
-    return { data, meta: { cached: false, generatedAt: new Date().toISOString() } };
+    return { data, meta: { cached: false, generatedAt: new Date().toISOString(), ...extraMeta } };
   }
 }

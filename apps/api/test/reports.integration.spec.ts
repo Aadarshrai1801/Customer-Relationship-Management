@@ -285,4 +285,51 @@ describe('reports forecast, pipeline, activity, and conversion', () => {
     expect(missing.status).toBe(404);
     expect(missing.body.code).toBe('PIPELINE_NOT_FOUND');
   });
+
+  it('redacts money in reports when field rules hide deal amounts', async () => {
+    const role = await ownerAgent.post('/v1/roles').send({
+      key: `blind-rep-${runId}`,
+      name: 'Blind Rep',
+      permissions: {
+        version: 1,
+        scopes: ['deals:read', 'reports:read'],
+        recordAccess: { deal: 'all', user: 'own' },
+        fields: { 'deal.amount': 'none', 'deal.baseAmount': 'none' },
+      },
+    });
+    expect(role.status).toBe(201);
+
+    const repAddr = email('blind');
+    await inviteAndAccept(server, ownerAgent, {
+      email: repAddr,
+      roleKey: `blind-rep-${runId}`,
+      name: 'Boris Blind',
+    });
+    const blindAgent = await loginAgent(server, repAddr, 'member-pass-12');
+
+    // Record endpoint strips the fields (existing behavior).
+    const listed = await blindAgent.get('/v1/deals').query({ limit: 1 });
+    expect(listed.status).toBe(200);
+    expect(listed.body.deals[0].amount).toBeUndefined();
+    expect(listed.body.deals[0].baseAmount).toBeUndefined();
+
+    // Reports keep counts but zero money with a redaction flag.
+    const forecast = await blindAgent.get('/v1/reports/forecast').query({ refresh: 'true' });
+    expect(forecast.status).toBe(200);
+    expect(forecast.body.meta.amountsRedacted).toBe(true);
+    expect(forecast.body.data.totals.dealCount).toBeGreaterThan(0);
+    expect(forecast.body.data.totals.totalBaseAmount).toBe(0);
+    expect(forecast.body.data.totals.weightedValue).toBe(0);
+
+    const pipeline = await blindAgent.get('/v1/reports/pipeline').query({ refresh: 'true' });
+    const stages = pipeline.body.data.pipelines[0].stages as Array<{
+      open: { count: number; baseAmount: number };
+    }>;
+    expect(stages.some((s) => s.open.count > 0)).toBe(true);
+    expect(stages.every((s) => s.open.baseAmount === 0)).toBe(true);
+
+    const conversion = await blindAgent.get('/v1/reports/conversion').query({ refresh: 'true' });
+    expect(conversion.body.data.deals.avgWonBaseAmount).toBe(0);
+    expect(conversion.body.data.deals.won).toBeGreaterThan(0);
+  });
 });

@@ -26,6 +26,8 @@ import { CollaborationModule } from './collaboration/collaboration.module';
 import { LeadRoutingModule } from './lead-routing/lead-routing.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { WebToLeadModule } from './web-to-lead/web-to-lead.module';
+import { RateLimitModule } from './rate-limit/rate-limit.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
 import { HealthController } from './health/health.controller';
 
 @Module({
@@ -57,6 +59,8 @@ import { HealthController } from './health/health.controller';
     LeadRoutingModule,
     NotificationsModule,
     WebToLeadModule,
+    RateLimitModule,
+    OnboardingModule,
   ],
   controllers: [HealthController],
 })
