@@ -127,6 +127,8 @@ describe('system role seeds', () => {
 
   it('grants owners everything, viewers read-only schema, reps own records', () => {
     const owner = SYSTEM_ROLE_SEEDS.find((r) => r.key === 'owner')!;
+    const admin = SYSTEM_ROLE_SEEDS.find((r) => r.key === 'admin')!;
+    const manager = SYSTEM_ROLE_SEEDS.find((r) => r.key === 'manager')!;
     const viewer = SYSTEM_ROLE_SEEDS.find((r) => r.key === 'viewer')!;
     const rep = SYSTEM_ROLE_SEEDS.find((r) => r.key === 'rep')!;
     expect(hasScope(owner.permissions, 'users:manage')).toBe(true);
@@ -134,5 +136,19 @@ describe('system role seeds', () => {
     expect(hasScope(viewer.permissions, 'custom_fields:read')).toBe(true);
     expect(hasScope(rep.permissions, 'custom_fields:read')).toBe(true);
     expect(rep.permissions.recordAccess['user']).toBe('own');
+    expect(hasScope(admin.permissions, 'deals:read')).toBe(true);
+    expect(hasScope(admin.permissions, 'deals:manage')).toBe(true);
+    expect(hasScope(admin.permissions, 'pipelines:manage')).toBe(true);
+    expect(hasScope(manager.permissions, 'deals:read')).toBe(true);
+    expect(hasScope(manager.permissions, 'deals:manage')).toBe(false);
+    expect(hasScope(manager.permissions, 'pipelines:manage')).toBe(false);
+    expect(hasScope(rep.permissions, 'deals:read')).toBe(true);
+    expect(hasScope(rep.permissions, 'deals:manage')).toBe(true);
+    expect(hasScope(viewer.permissions, 'deals:read')).toBe(true);
+    expect(hasScope(viewer.permissions, 'deals:manage')).toBe(false);
+    expect(admin.permissions.recordAccess['deal']).toBe('all');
+    expect(manager.permissions.recordAccess['deal']).toBe('all');
+    expect(rep.permissions.recordAccess['deal']).toBe('own');
+    expect(viewer.permissions.recordAccess['deal']).toBe('own');
   });
 });

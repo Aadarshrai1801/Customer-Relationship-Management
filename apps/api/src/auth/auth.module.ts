@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { SessionModule } from './session.module';
 import { SsoModule } from '../sso/sso.module';
+import { PipelinesModule } from '../pipelines/pipelines.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { AuthGuard } from './auth.guard';
@@ -13,7 +14,7 @@ import { TwoFactorService } from './two-factor.service';
 const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 
 @Module({
-  imports: [SessionModule, SsoModule],
+  imports: [SessionModule, SsoModule, PipelinesModule],
   controllers: [AuthController, TwoFactorController],
   providers: [
     AuthService,

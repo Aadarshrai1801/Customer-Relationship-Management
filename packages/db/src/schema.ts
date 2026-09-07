@@ -1,6 +1,8 @@
 import {
   boolean,
+  date,
   jsonb,
+  numeric,
   pgTable,
   text,
   timestamp,
@@ -17,6 +19,7 @@ export interface OrganizationSettings {
   timezone: string;
   locale: string;
   dateFormat: string;
+  baseCurrency: string;
 }
 
 export interface OrganizationSecuritySettings {
@@ -37,6 +40,7 @@ export const DEFAULT_ORGANIZATION_SETTINGS: OrganizationSettings = {
   timezone: 'UTC',
   locale: 'en-US',
   dateFormat: 'YYYY-MM-DD',
+  baseCurrency: 'USD',
 };
 
 export const DEFAULT_ORGANIZATION_SECURITY_SETTINGS: OrganizationSecuritySettings = {
@@ -272,6 +276,16 @@ export type NewSsoConfig = typeof ssoConfigs.$inferInsert;
 export type SsoLoginState = typeof ssoLoginStates.$inferSelect;
 export type AuditLogEntry = typeof auditLogEntries.$inferSelect;
 export type NewAuditLogEntry = typeof auditLogEntries.$inferInsert;
+export type Pipeline = typeof pipelines.$inferSelect;
+export type NewPipeline = typeof pipelines.$inferInsert;
+export type PipelineStage = typeof pipelineStages.$inferSelect;
+export type NewPipelineStage = typeof pipelineStages.$inferInsert;
+export type Deal = typeof deals.$inferSelect;
+export type NewDeal = typeof deals.$inferInsert;
+export type DealStageHistory = typeof dealStageHistory.$inferSelect;
+export type ExchangeRate = typeof exchangeRates.$inferSelect;
+export type Product = typeof products.$inferSelect;
+export type DealLineItem = typeof dealLineItems.$inferSelect;
 export type GdprExport = typeof gdprExports.$inferSelect;
 export type NewGdprExport = typeof gdprExports.$inferInsert;
 export type Account = typeof accounts.$inferSelect;
@@ -298,13 +312,7 @@ export type NewLeadAssignmentLog = typeof leadAssignmentLogs.$inferInsert;
 export type AppNotification = typeof notifications.$inferSelect;
 export type NewAppNotification = typeof notifications.$inferInsert;
 
-export const LEAD_STATUSES = [
-  'new',
-  'contacted',
-  'qualified',
-  'unqualified',
-  'converted',
-] as const;
+export const LEAD_STATUSES = ['new', 'contacted', 'qualified', 'unqualified', 'converted'] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
 export const LEAD_SOURCES = [
@@ -655,5 +663,173 @@ export const notifications = pgTable(
   (t) => [index('ix_notifications_user_read').on(t.orgId, t.userId, t.readAt)],
 );
 
-export * from './env';
+export const pipelines = pgTable(
+  'pipelines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(),
+    description: text('description'),
+    isDefault: boolean('is_default').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uq_pipelines_org_slug').on(t.orgId, t.slug)],
+);
 
+export const pipelineStages = pgTable(
+  'pipeline_stages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    pipelineId: uuid('pipeline_id')
+      .notNull()
+      .references(() => pipelines.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    name: text('name').notNull(),
+    position: integer('position').notNull(),
+    probability: integer('probability').notNull(),
+    isClosedWon: boolean('is_closed_won').notNull().default(false),
+    isClosedLost: boolean('is_closed_lost').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('uq_pipeline_stages_pipeline_key').on(t.pipelineId, t.key),
+    uniqueIndex('uq_pipeline_stages_pipeline_position').on(t.pipelineId, t.position),
+    index('ix_pipeline_stages_pipeline_position').on(t.pipelineId, t.position),
+  ],
+);
+
+export const deals = pgTable(
+  'deals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    pipelineId: uuid('pipeline_id')
+      .notNull()
+      .references(() => pipelines.id, { onDelete: 'restrict' }),
+    stageId: uuid('stage_id')
+      .notNull()
+      .references(() => pipelineStages.id, { onDelete: 'restrict' }),
+    accountId: uuid('account_id').references(() => accounts.id, { onDelete: 'set null' }),
+    contactId: uuid('contact_id').references(() => contacts.id, { onDelete: 'set null' }),
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    amount: numeric('amount', { precision: 19, scale: 2 }).notNull(),
+    currency: text('currency').notNull(),
+    baseCurrency: text('base_currency').notNull(),
+    baseAmount: numeric('base_amount', { precision: 19, scale: 2 }).notNull(),
+    exchangeRate: numeric('exchange_rate', { precision: 19, scale: 6 }).notNull(),
+    exchangeRateDate: date('exchange_rate_date', { mode: 'string' }).notNull(),
+    probability: integer('probability'),
+    expectedCloseDate: timestamp('expected_close_date', { withTimezone: true }),
+    status: text('status').$type<'open' | 'won' | 'lost'>().notNull().default('open'),
+    lossReason: text('loss_reason'),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    customFields: jsonb('custom_fields').$type<Record<string, unknown>>().notNull().default({}),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ix_deals_org_pipeline_stage').on(t.orgId, t.pipelineId, t.stageId),
+    index('ix_deals_org_owner').on(t.orgId, t.ownerId),
+    index('ix_deals_org_account').on(t.orgId, t.accountId),
+    index('ix_deals_org_close').on(t.orgId, t.expectedCloseDate),
+  ],
+);
+
+export const dealStageHistory = pgTable(
+  'deal_stage_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    dealId: uuid('deal_id')
+      .notNull()
+      .references(() => deals.id, { onDelete: 'cascade' }),
+    fromStageId: uuid('from_stage_id').references(() => pipelineStages.id, {
+      onDelete: 'set null',
+    }),
+    toStageId: uuid('to_stage_id').references(() => pipelineStages.id, { onDelete: 'set null' }),
+    fromStageName: text('from_stage_name'),
+    toStageName: text('to_stage_name').notNull(),
+    enteredAt: timestamp('entered_at', { withTimezone: true }).notNull().defaultNow(),
+    exitedAt: timestamp('exited_at', { withTimezone: true }),
+    durationSeconds: integer('duration_seconds'),
+    actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+  },
+  (t) => [index('ix_deal_stage_history_deal').on(t.orgId, t.dealId, t.enteredAt)],
+);
+
+export const exchangeRates = pgTable(
+  'exchange_rates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    rateDate: date('rate_date', { mode: 'string' }).notNull(),
+    baseCurrency: text('base_currency').notNull(),
+    rates: jsonb('rates').$type<Record<string, number>>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('uq_exchange_rates_org_date_base').on(t.orgId, t.rateDate, t.baseCurrency),
+    index('ix_exchange_rates_org_base_date').on(t.orgId, t.baseCurrency, t.rateDate),
+  ],
+);
+
+export const products = pgTable(
+  'products',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    sku: text('sku'),
+    unitPrice: numeric('unit_price', { precision: 19, scale: 2 }).notNull(),
+    currency: text('currency').notNull(),
+    taxRate: numeric('tax_rate', { precision: 7, scale: 4 }).notNull().default('0'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_products_org_active').on(t.orgId, t.isActive)],
+);
+
+export const dealLineItems = pgTable(
+  'deal_line_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    dealId: uuid('deal_id')
+      .notNull()
+      .references(() => deals.id, { onDelete: 'cascade' }),
+    productId: uuid('product_id').references(() => products.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    quantity: numeric('quantity', { precision: 12, scale: 2 }).notNull(),
+    unitPrice: numeric('unit_price', { precision: 19, scale: 2 }).notNull(),
+    discountRate: numeric('discount_rate', { precision: 7, scale: 4 }).notNull().default('0'),
+    taxRate: numeric('tax_rate', { precision: 7, scale: 4 }).notNull().default('0'),
+    lineTotal: numeric('line_total', { precision: 19, scale: 2 }).notNull(),
+    currency: text('currency').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_deal_line_items_deal').on(t.orgId, t.dealId)],
+);
+
+export * from './env';

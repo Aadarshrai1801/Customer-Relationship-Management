@@ -35,6 +35,7 @@ import { AttemptThrottle } from './attempt-throttle.service';
 import { LOGIN_THROTTLE } from './throttle.tokens';
 import { SsoService } from '../sso/sso.service';
 import { AuditService } from '../audit/audit.service';
+import { PipelinesService } from '../pipelines/pipelines.service';
 import { generateToken, hashToken } from './tokens';
 import type { PublicOrg, PublicUser, TwoFactorState } from './auth-shapes';
 import { toPublicOrg, toPublicUser } from './auth-shapes';
@@ -63,6 +64,7 @@ export class AuthService {
     @Inject(LOGIN_THROTTLE) private readonly loginThrottle: AttemptThrottle,
     @Inject(SsoService) private readonly sso: SsoService,
     @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(PipelinesService) private readonly pipelines: PipelinesService,
   ) {}
 
   async signup(
@@ -107,6 +109,8 @@ export class AuthService {
       })
       .returning();
     if (!user) throw new Error('Failed to create user');
+
+    await this.pipelines.ensureDefaultPipeline(org.id, { id: user.id, email: user.email });
 
     const { session, twoFactor } = await this.issueSession(user, org, meta);
 

@@ -21,7 +21,13 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
     {
       key: 'owner',
       name: 'Owner',
-      permissions: perms(['*'], { user: 'all', contact: 'all', account: 'all', lead: 'all' }),
+      permissions: perms(['*'], {
+        user: 'all',
+        contact: 'all',
+        account: 'all',
+        lead: 'all',
+        deal: 'all',
+      }),
     },
     {
       key: 'admin',
@@ -45,9 +51,12 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
           'leads:read',
           'leads:manage',
           'lead_routing:manage',
+          'deals:read',
+          'deals:manage',
+          'pipelines:manage',
           'notifications:read',
         ],
-        { user: 'all', contact: 'all', account: 'all', lead: 'all' },
+        { user: 'all', contact: 'all', account: 'all', lead: 'all', deal: 'all' },
       ),
     },
     {
@@ -63,6 +72,7 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
           'leads:read',
           'leads:manage',
           'lead_routing:manage',
+          'deals:read',
           'notifications:read',
         ],
         {
@@ -70,6 +80,7 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
           contact: 'all',
           account: 'all',
           lead: 'all',
+          deal: 'all',
         },
       ),
     },
@@ -86,6 +97,8 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
           'accounts:manage',
           'leads:read',
           'leads:manage',
+          'deals:read',
+          'deals:manage',
           'notifications:read',
         ],
         {
@@ -93,6 +106,7 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
           contact: 'own',
           account: 'own',
           lead: 'own',
+          deal: 'own',
         },
       ),
     },
@@ -100,14 +114,21 @@ export const SYSTEM_ROLE_SEEDS: Array<{ key: string; name: string; permissions: 
       key: 'viewer',
       name: 'Viewer',
       permissions: perms(
-        ['custom_fields:read', 'contacts:read', 'accounts:read', 'leads:read', 'notifications:read'],
+        [
+          'custom_fields:read',
+          'contacts:read',
+          'accounts:read',
+          'leads:read',
+          'deals:read',
+          'notifications:read',
+        ],
         {
           user: 'own',
           contact: 'own',
           account: 'own',
           lead: 'own',
+          deal: 'own',
         },
       ),
     },
   ];
-

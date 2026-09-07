@@ -71,6 +71,13 @@
       "when": 1788702000000,
       "tag": "0009_leads",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788750225538,
+      "tag": "0010_deals",
+      "breakpoints": true
     }
   ]
 }
