@@ -21,6 +21,8 @@ import { TenantDb, type NexusDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
 import { AuditService, diffObjects } from '../audit/audit.service';
 import { ContactsService } from '../contacts/contacts.service';
+import { MailService } from '../mail/mail.service';
+import { NotificationPreferencesService } from '../notifications/notification-preferences.service';
 import { WorkflowEngine } from '../workflows/workflow-engine.service';
 import { checkRecordAccess, hasScope } from '../rbac/permissions';
 import type {
@@ -73,6 +75,7 @@ export interface SerializedActivity {
   direction: string;
   senderEmail: string | null;
   recipientEmails: string[];
+  durationSeconds: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -156,6 +159,9 @@ export class TasksService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(ContactsService) private readonly contacts: ContactsService,
     @Inject(WorkflowEngine) private readonly workflows: WorkflowEngine,
+    @Inject(MailService) private readonly mail: MailService,
+    @Inject(NotificationPreferencesService)
+    private readonly preferences: NotificationPreferencesService,
   ) {}
 
   async create(auth: AuthContext, input: CreateTaskInput): Promise<{ task: SerializedTask }> {
@@ -510,9 +516,28 @@ export class TasksService {
     auth: AuthContext,
     nowInput?: Date,
   ): Promise<{ ownersNotified: number; tasksIncluded: number }> {
-    return this.tenantDb.tx(auth.org.id, async (db) => {
+    const result = await this.tenantDb.tx(auth.org.id, async (db) => {
       return this.dispatchDigestsForOrg(db, auth.org.id, nowInput ?? new Date(), auth);
     });
+    await this.sendDigestEmails(result.emailTargets);
+    return { ownersNotified: result.ownersNotified, tasksIncluded: result.tasksIncluded };
+  }
+
+  /** Best-effort post-commit digest emails (skipped silently on failure). */
+  async sendDigestEmails(
+    targets: Array<{ email: string; name: string; lines: string[]; count: number }>,
+  ): Promise<void> {
+    for (const target of targets) {
+      try {
+        await this.mail.sendEmail({
+          to: target.email,
+          subject: `[Nexus] Daily task digest: ${target.count} task${target.count === 1 ? '' : 's'}`,
+          text: `Hi ${target.name},\n\nTasks needing attention:\n${target.lines.join('\n')}\n\nEmpty digests are never sent — this email means something is due.`,
+        });
+      } catch {
+        // Advisory only.
+      }
+    }
   }
 
   /** Worker entry point: same digest without a requesting user. */
@@ -521,7 +546,11 @@ export class TasksService {
     orgId: string,
     now: Date,
     auth?: AuthContext,
-  ): Promise<{ ownersNotified: number; tasksIncluded: number }> {
+  ): Promise<{
+    ownersNotified: number;
+    tasksIncluded: number;
+    emailTargets: Array<{ email: string; name: string; lines: string[]; count: number }>;
+  }> {
     const todayStart = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
     );
@@ -545,26 +574,47 @@ export class TasksService {
         ),
       )
       .orderBy(desc(tasks.dueAt));
-    const byOwner = new Map<string, { name: string; items: Task[] }>();
+    const byOwner = new Map<string, { name: string; email: string | null; items: Task[] }>();
     for (const row of rows) {
       const ownerId = row.task.ownerId as string;
-      const group = byOwner.get(ownerId) ?? { name: row.owner?.name ?? 'there', items: [] };
+      const group = byOwner.get(ownerId) ?? {
+        name: row.owner?.name ?? 'there',
+        email: row.owner?.email ?? null,
+        items: [],
+      };
       group.items.push(row.task);
       byOwner.set(ownerId, group);
     }
+    // Digest emails (PRD 4.16 P1) go out post-commit, best-effort.
+    const emailTargets: Array<{ email: string; name: string; lines: string[]; count: number }> = [];
     for (const [ownerId, group] of byOwner) {
       const lines = group.items.map((t) => {
         const due = t.dueAt ? `due ${t.dueAt.toISOString().slice(0, 10)}` : 'reminder due';
         return `• ${t.title} (${due})`;
       });
-      await db.insert(notifications).values({
-        orgId,
-        userId: ownerId,
-        type: 'task_digest',
-        title: `Task digest: ${group.items.length} task${group.items.length === 1 ? '' : 's'} need${group.items.length === 1 ? 's' : ''} attention`,
-        body: `Hi ${group.name},\n${lines.join('\n')}`,
-        link: '/tasks?remindersDue=true',
-      });
+      const title = `Task digest: ${group.items.length} task${group.items.length === 1 ? '' : 's'} need${group.items.length === 1 ? 's' : ''} attention`;
+      const body = `Hi ${group.name},\n${lines.join('\n')}`;
+      if (await this.preferences.wantsChannel(db, orgId, ownerId, 'task_digest', 'inapp')) {
+        await db.insert(notifications).values({
+          orgId,
+          userId: ownerId,
+          type: 'task_digest',
+          title,
+          body,
+          link: '/tasks?remindersDue=true',
+        });
+      }
+      if (
+        group.email &&
+        (await this.preferences.wantsChannel(db, orgId, ownerId, 'task_digest', 'email'))
+      ) {
+        emailTargets.push({
+          email: group.email,
+          name: group.name,
+          lines,
+          count: group.items.length,
+        });
+      }
       await db
         .update(tasks)
         .set({ reminderSentAt: now })
@@ -590,6 +640,7 @@ export class TasksService {
     return {
       ownersNotified: byOwner.size,
       tasksIncluded: rows.length,
+      emailTargets,
     };
   }
 
@@ -873,6 +924,7 @@ export class TasksService {
           subject: input.subject ?? null,
           body: input.body ?? null,
           occurredAt: input.occurredAt ? new Date(input.occurredAt) : new Date(),
+          durationSeconds: input.durationSeconds ?? null,
         })
         .returning();
       if (!created) throw new Error('Activity insert returned no row');
@@ -994,6 +1046,7 @@ export class TasksService {
       direction: activity.direction,
       senderEmail: activity.senderEmail,
       recipientEmails: (activity.recipientEmails ?? []) as string[],
+      durationSeconds: activity.durationSeconds,
       createdAt: activity.createdAt,
       updatedAt: activity.updatedAt,
     };

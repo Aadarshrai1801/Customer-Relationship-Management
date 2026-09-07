@@ -3,16 +3,19 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   Inject,
   Param,
   Patch,
   Post,
   Query,
   Req,
+  Res,
   UnauthorizedException,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { Public } from '../common/public.decorator';
 import { RequireScopes } from '../rbac/require-scopes.decorator';
 import { EmailsService } from './emails.service';
 import {
@@ -75,6 +78,12 @@ export class EmailsController {
   ): Promise<unknown> {
     return this.emails.send(authOf(req), body as SendEmailInput);
   }
+
+  @RequireScopes('activities:read')
+  @Get(':id/tracking')
+  async tracking(@Req() req: Request, @Param('id') id: string): Promise<unknown> {
+    return this.emails.trackingSummary(authOf(req), id);
+  }
 }
 
 @Controller('email-templates')
@@ -116,5 +125,46 @@ export class EmailTemplatesController {
   @Delete(':id')
   async remove(@Req() req: Request, @Param('id') id: string): Promise<unknown> {
     return this.emails.removeTemplate(authOf(req), id);
+  }
+}
+
+const PIXEL_GIF = Buffer.from(
+  'R0lGODlhAQABAIAAAP///////yH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==',
+  'base64',
+);
+
+@Controller('email-tracking')
+export class EmailTrackingController {
+  constructor(@Inject(EmailsService) private readonly emails: EmailsService) {}
+
+  /** Always 200s, even for bad tokens — validity must not leak. */
+  @Public()
+  @Get('open/:token')
+  @Header('Content-Type', 'image/gif')
+  @Header('Cache-Control', 'no-store')
+  async open(
+    @Param('token') token: string,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<Buffer> {
+    await this.emails.recordOpen(token, req.headers['user-agent']);
+    void res;
+    return PIXEL_GIF;
+  }
+
+  @Public()
+  @Get('click/:token')
+  async click(
+    @Param('token') token: string,
+    @Query('u') url: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
+    const target = await this.emails.recordClick(token, url ?? '', req.headers['user-agent']);
+    if (!target) {
+      res.status(404).json({ message: 'Not found', code: 'NOT_FOUND' });
+      return;
+    }
+    res.redirect(302, target);
   }
 }

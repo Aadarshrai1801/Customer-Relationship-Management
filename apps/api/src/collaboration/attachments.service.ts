@@ -26,7 +26,7 @@ export function storageRoot(): string {
   return resolve(process.env.STORAGE_DIR ?? 'storage', 'attachments');
 }
 
-/** Predictable allowlist (documented): documents, images, and archives. */
+/** Predictable allowlist (documented): documents, images, audio, archives. */
 const ALLOWED_EXTENSIONS = new Set([
   'pdf',
   'png',
@@ -44,6 +44,10 @@ const ALLOWED_EXTENSIONS = new Set([
   'ppt',
   'pptx',
   'zip',
+  'mp3',
+  'wav',
+  'm4a',
+  'ogg',
 ]);
 
 function extensionOf(filename: string): string {

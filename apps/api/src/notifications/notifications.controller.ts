@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   HttpCode,
@@ -12,24 +13,32 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import type { Request } from 'express';
+import { z } from 'zod';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { RequireScopes } from '../rbac/require-scopes.decorator';
-import {
-  listNotificationsQuerySchema,
-  type ListNotificationsQuery,
-} from './notifications.schemas';
+import { listNotificationsQuerySchema, type ListNotificationsQuery } from './notifications.schemas';
 import { NotificationsService } from './notifications.service';
+import { NotificationPreferencesService } from './notification-preferences.service';
 
 function authOf(req: Request): NonNullable<Request['auth']> {
   if (!req.auth) throw new UnauthorizedException();
   return req.auth;
 }
 
+const preferenceSchema = z
+  .object({
+    type: z.string().trim().min(1).max(60),
+    channels: z.array(z.string().trim().min(1).max(20)).max(5),
+  })
+  .strict();
+
 @Controller('notifications')
 export class NotificationsController {
   constructor(
     @Inject(NotificationsService)
     private readonly notificationsService: NotificationsService,
+    @Inject(NotificationPreferencesService)
+    private readonly preferences: NotificationPreferencesService,
   ) {}
 
   @RequireScopes('notifications:read')
@@ -59,5 +68,21 @@ export class NotificationsController {
   async markAllAsRead(@Req() req: Request): Promise<unknown> {
     const auth = authOf(req);
     return this.notificationsService.markAllAsRead(auth.org.id, auth.user.id);
+  }
+
+  @RequireScopes('notifications:read')
+  @Get('preferences')
+  async getPreferences(@Req() req: Request): Promise<unknown> {
+    return this.preferences.list(authOf(req));
+  }
+
+  @RequireScopes('notifications:read')
+  @Post('preferences')
+  @HttpCode(HttpStatus.OK)
+  async setPreference(
+    @Req() req: Request,
+    @Body(new ZodValidationPipe(preferenceSchema)) body: unknown,
+  ): Promise<unknown> {
+    return this.preferences.set(authOf(req), body as { type: string; channels: string[] });
   }
 }

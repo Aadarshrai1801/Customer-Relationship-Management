@@ -14,6 +14,8 @@ import {
   contacts,
   deals,
   emailTemplates,
+  emailTrackingEvents,
+  organizations,
   users,
   type Activity,
   type EmailTemplate,
@@ -23,7 +25,15 @@ import type { AuthContext } from '../common/auth-context';
 import { AuditService } from '../audit/audit.service';
 import { ContactsService } from '../contacts/contacts.service';
 import { MailService } from '../mail/mail.service';
+import { SequencesService } from '../sequences/sequences.service';
 import { checkRecordAccess } from '../rbac/permissions';
+import {
+  escapeHtml,
+  renderTemplateText,
+  rewriteLinksForTracking,
+  signTrackingToken,
+  verifyTrackingToken,
+} from './tracking-tokens';
 import type {
   ConvertSuggestionInput,
   CreateTemplateInput,
@@ -68,20 +78,6 @@ function parseCursor(cursor: string): { time: Date; id: string } | null {
   return { time, id };
 }
 
-/**
- * Renders {{variable}} placeholders. Unknown keys render empty rather
- * than failing the send (stated assumption, documented on the template
- * table). Values are stringified; surrounding whitespace in the key is
- * ignored and matching is case-sensitive.
- */
-export function renderTemplateText(template: string, variables: Record<string, unknown>): string {
-  return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_match, key: string) => {
-    const value = variables[key];
-    if (value === null || value === undefined) return '';
-    return typeof value === 'string' ? value : String(value);
-  });
-}
-
 @Injectable()
 export class EmailsService {
   constructor(
@@ -89,6 +85,7 @@ export class EmailsService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(ContactsService) private readonly contacts: ContactsService,
     @Inject(MailService) private readonly mail: MailService,
+    @Inject(SequencesService) private readonly sequences: SequencesService,
   ) {}
 
   /**
@@ -101,8 +98,14 @@ export class EmailsService {
   async syncInbound(
     auth: AuthContext,
     input: SyncInboundInput,
-  ): Promise<{ activity: SerializedEmailActivity; created: boolean; changed: boolean }> {
-    return this.tenantDb.tx(auth.org.id, async (db) => {
+  ): Promise<{
+    activity: SerializedEmailActivity;
+    created: boolean;
+    changed: boolean;
+    replyToId: string | null;
+    contactId: string | null;
+  }> {
+    const result = await this.tenantDb.tx(auth.org.id, async (db) => {
       const [existing] = await db
         .select()
         .from(activities)
@@ -118,9 +121,15 @@ export class EmailsService {
           activity: await this.serializeEmailById(db, auth, existing.id),
           created: false,
           changed: false,
+          replyToId: existing.replyToId,
+          contactId: existing.contactId,
         };
       }
       const match = await this.matchContactByEmails(db, auth.org.id, [input.from, ...input.to]);
+      const replyToId = await this.detectReply(db, auth.org.id, input.subject ?? null, [
+        input.from.toLowerCase(),
+        ...input.to.map((e) => e.toLowerCase()),
+      ]);
       const [created] = await db
         .insert(activities)
         .values({
@@ -137,6 +146,7 @@ export class EmailsService {
           recipientEmails: input.to.map((e) => e.toLowerCase()),
           provider: input.provider,
           externalId: input.externalId,
+          replyToId,
         })
         .returning();
       if (!created) throw new Error('Inbound email insert returned no row');
@@ -157,8 +167,64 @@ export class EmailsService {
         activity: await this.serializeEmailById(db, auth, created.id),
         created: true,
         changed: true,
+        replyToId,
+        contactId: match?.contactId ?? null,
       };
     });
+    // Sequence auto-pause on reply (PRD 4.5 edge): post-commit so a
+    // pause failure can never roll back the logged email.
+    if (result.replyToId && result.contactId) {
+      await this.sequences.pauseForReply(auth.org.id, result.contactId).catch(() => undefined);
+    }
+    return result;
+  }
+
+  /**
+   * Reply detection (PRD 4.5 P1): an inbound message whose normalized
+   * subject (Re:/Fwd:/Aw: stripped) matches a prior thread email with an
+   * overlapping participant links to it. Best-effort heuristic — the link
+   * is surfaced, never silently acted on, except sequence auto-pause.
+   */
+  async detectReply(
+    db: NexusDb,
+    orgId: string,
+    subject: string | null,
+    participants: string[],
+  ): Promise<string | null> {
+    if (!subject) return null;
+    const normalized = subject
+      .replace(/^\s*((re|fwd?|aw)\s*:)+\s*/i, '')
+      .trim()
+      .toLowerCase();
+    if (!normalized) return null;
+    const candidates = await db
+      .select({
+        id: activities.id,
+        subject: activities.subject,
+        senderEmail: activities.senderEmail,
+        recipientEmails: activities.recipientEmails,
+      })
+      .from(activities)
+      .where(and(eq(activities.orgId, orgId), eq(activities.type, 'email')))
+      .orderBy(desc(activities.occurredAt))
+      .limit(100);
+    const party = new Set(participants.map((p) => p.toLowerCase()));
+    for (const candidate of candidates) {
+      if (!candidate.subject) continue;
+      const candidateNormalized = candidate.subject
+        .replace(/^\s*((re|fwd?|aw)\s*:)+\s*/i, '')
+        .trim()
+        .toLowerCase();
+      if (candidateNormalized !== normalized) continue;
+      const candidateParties = [
+        candidate.senderEmail?.toLowerCase(),
+        ...((candidate.recipientEmails ?? []) as string[]).map((e) => e.toLowerCase()),
+      ].filter(Boolean);
+      if (candidateParties.some((p) => party.has(p as string))) {
+        return candidate.id;
+      }
+    }
+    return null;
   }
 
   async listSuggestions(
@@ -507,10 +573,17 @@ export class EmailsService {
         })
         .returning();
       if (!staged) throw new Error('Outbound email insert returned no row');
+      const tracking = await this.trackingFor(db, auth.org.id, staged.id);
+      const trackedBody = tracking ? rewriteLinksForTracking(body, tracking.clickBase) : body;
       const messageId = await this.mail.sendEmail({
         to: input.to,
         subject,
-        text: body,
+        text: tracking ? `${trackedBody}\n\n[Tracked: opens and clicks are logged]` : trackedBody,
+        ...(tracking
+          ? {
+              html: `<p>${escapeHtml(trackedBody).replace(/\n/g, '<br/>')}</p><img src="${tracking.pixelUrl}" width="1" height="1" alt=""/>`,
+            }
+          : {}),
       });
       await db
         .update(activities)
@@ -530,6 +603,108 @@ export class EmailsService {
         messageId,
       };
     });
+  }
+
+  private async trackingFor(
+    db: NexusDb,
+    orgId: string,
+    activityId: string,
+  ): Promise<{ pixelUrl: string; clickBase: string } | null> {
+    const [org] = await db
+      .select({ settings: organizations.settings })
+      .from(organizations)
+      .where(eq(organizations.id, orgId));
+    const settings = (org?.settings ?? {}) as { emailTrackingEnabled?: unknown };
+    if (settings.emailTrackingEnabled === false) return null;
+    const token = signTrackingToken(activityId, orgId);
+    const base = `${this.mail.trackingBaseUrl}/v1/email-tracking`;
+    return { pixelUrl: `${base}/open/${token}`, clickBase: `${base}/click/${token}` };
+  }
+
+  /**
+   * Best-effort counts (PRD 4.5: pixels undercount under Apple Mail
+   * Privacy Protection — surfaced as signals with that caveat, never as
+   * exact read receipts).
+   */
+  async trackingSummary(
+    auth: AuthContext,
+    activityId: string,
+  ): Promise<{ opens: number; clicks: number; events: Array<{ kind: string; at: Date }> }> {
+    return this.tenantDb.tx(auth.org.id, async (db) => {
+      await this.serializeEmailById(db, auth, activityId);
+      const rows = await db
+        .select({ kind: emailTrackingEvents.kind, at: emailTrackingEvents.createdAt })
+        .from(emailTrackingEvents)
+        .where(
+          and(
+            eq(emailTrackingEvents.orgId, auth.org.id),
+            eq(emailTrackingEvents.activityId, activityId),
+          ),
+        )
+        .orderBy(desc(emailTrackingEvents.createdAt));
+      return {
+        opens: rows.filter((r) => r.kind === 'open').length,
+        clicks: rows.filter((r) => r.kind === 'click').length,
+        events: rows.map((r) => ({ kind: r.kind, at: r.at })),
+      };
+    });
+  }
+
+  async recordOpen(token: string, userAgent: string | undefined): Promise<void> {
+    const verified = verifyTrackingToken(token);
+    if (!verified) return;
+    await this.tenantDb.tx(verified.orgId, async (db) => {
+      const [activity] = await db
+        .select({ id: activities.id })
+        .from(activities)
+        .where(
+          and(
+            eq(activities.id, verified.activityId),
+            eq(activities.orgId, verified.orgId),
+            eq(activities.type, 'email'),
+          ),
+        );
+      if (!activity) return;
+      await db.insert(emailTrackingEvents).values({
+        orgId: verified.orgId,
+        activityId: activity.id,
+        kind: 'open',
+        userAgent: userAgent?.slice(0, 500) ?? null,
+      });
+    });
+  }
+
+  async recordClick(
+    token: string,
+    url: string,
+    userAgent: string | undefined,
+  ): Promise<string | null> {
+    const verified = verifyTrackingToken(token);
+    if (!verified) return null;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) return null;
+    let found = false;
+    await this.tenantDb.tx(verified.orgId, async (db) => {
+      const [activity] = await db
+        .select({ id: activities.id })
+        .from(activities)
+        .where(
+          and(
+            eq(activities.id, verified.activityId),
+            eq(activities.orgId, verified.orgId),
+            eq(activities.type, 'email'),
+          ),
+        );
+      if (!activity) return;
+      found = true;
+      await db.insert(emailTrackingEvents).values({
+        orgId: verified.orgId,
+        activityId: activity.id,
+        kind: 'click',
+        url: url.slice(0, 2000),
+        userAgent: userAgent?.slice(0, 500) ?? null,
+      });
+    });
+    return found ? url : null;
   }
 
   private async requireLiveTemplate(

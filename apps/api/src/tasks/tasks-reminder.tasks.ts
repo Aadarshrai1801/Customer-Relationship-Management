@@ -36,6 +36,7 @@ export class TasksReminderTasks {
       );
       ownersNotified += result.ownersNotified;
       tasksIncluded += result.tasksIncluded;
+      await this.tasks.sendDigestEmails(result.emailTargets);
     }
     return { orgs: orgs.length, ownersNotified, tasksIncluded };
   }

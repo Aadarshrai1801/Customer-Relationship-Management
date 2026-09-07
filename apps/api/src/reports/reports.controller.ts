@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -9,9 +10,10 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UnauthorizedException,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { RequireScopes } from '../rbac/require-scopes.decorator';
@@ -84,6 +86,27 @@ export class ReportsController {
     @Query(new ZodValidationPipe(conversionReportQuerySchema)) query: unknown,
   ): Promise<unknown> {
     return this.reports.conversion(authOf(req), query as ConversionReportQuery);
+  }
+
+  @RequireScopes('reports:read')
+  @Get(':name/export')
+  async export(
+    @Req() req: Request,
+    @Param('name') name: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    if (
+      name !== 'forecast' &&
+      name !== 'pipeline' &&
+      name !== 'activity' &&
+      name !== 'conversion'
+    ) {
+      throw new BadRequestException({ message: 'Unknown report', code: 'UNKNOWN_REPORT' });
+    }
+    const { filename, csv } = await this.reports.exportCsv(authOf(req), name);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return csv;
   }
 }
 

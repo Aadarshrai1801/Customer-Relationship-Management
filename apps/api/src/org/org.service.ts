@@ -110,6 +110,9 @@ export class OrgService {
           ? { attachmentStorageCapBytes: input.attachmentStorageCapBytes }
           : {}),
         ...(input.staleDealDays !== undefined ? { staleDealDays: input.staleDealDays } : {}),
+        ...(input.emailTrackingEnabled !== undefined
+          ? { emailTrackingEnabled: input.emailTrackingEnabled }
+          : {}),
       };
       const [next] = await db
         .update(organizations)
@@ -123,11 +126,13 @@ export class OrgService {
           attachmentStorageCapBytes: (org.settings as OrganizationSettings)
             .attachmentStorageCapBytes,
           staleDealDays: (org.settings as OrganizationSettings).staleDealDays,
+          emailTrackingEnabled: (org.settings as OrganizationSettings).emailTrackingEnabled,
         },
         {
           maxAttachmentBytes: nextSettings.maxAttachmentBytes,
           attachmentStorageCapBytes: nextSettings.attachmentStorageCapBytes,
           staleDealDays: nextSettings.staleDealDays,
+          emailTrackingEnabled: nextSettings.emailTrackingEnabled,
         },
       );
       if (Object.keys(newValues).length > 0) {

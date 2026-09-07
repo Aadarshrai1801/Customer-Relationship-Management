@@ -20,7 +20,9 @@ import { PipelinesModule } from './pipelines/pipelines.module';
 import { DealsModule } from './deals/deals.module';
 import { ProductsModule } from './products/products.module';
 import { TasksModule } from './tasks/tasks.module';
+import { SequencesModule } from './sequences/sequences.module';
 import { EmailsModule } from './emails/emails.module';
+import { QuotesModule } from './quotes/quotes.module';
 import { ReportsModule } from './reports/reports.module';
 import { CollaborationModule } from './collaboration/collaboration.module';
 import { WorkflowsModule } from './workflows/workflows.module';
@@ -55,7 +57,9 @@ import { HealthController } from './health/health.controller';
     DealsModule,
     ProductsModule,
     TasksModule,
+    SequencesModule,
     EmailsModule,
+    QuotesModule,
     ReportsModule,
     CollaborationModule,
     WorkflowsModule,

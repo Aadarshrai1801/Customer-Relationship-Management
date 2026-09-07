@@ -238,6 +238,24 @@ describe('tasks core crud, scoping, reminders, and activity logging', () => {
     expect(ids).not.toContain(doomedId);
   });
 
+  it('logs call durations in seconds', async () => {
+    const call = await ownerAgent.post('/v1/activities').send({
+      type: 'call',
+      subject: 'Timed call',
+      durationSeconds: 300,
+      contactId,
+    });
+    expect(call.status).toBe(201);
+    expect(call.body.activity.durationSeconds).toBe(300);
+
+    const bad = await ownerAgent.post('/v1/activities').send({
+      type: 'call',
+      subject: 'Bad duration',
+      durationSeconds: -5,
+    });
+    expect(bad.status).toBe(400);
+  });
+
   it('surfaces logged activities on the contact timeline', async () => {
     const logged = await ownerAgent.post('/v1/activities').send({
       type: 'meeting',

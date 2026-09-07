@@ -39,6 +39,77 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+function toCsv(rows: string[][]): string {
+  return (
+    rows
+      .map((row) =>
+        row
+          .map((cell) => {
+            const text = cell ?? '';
+            return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+          })
+          .join(','),
+      )
+      .join('\n') + '\n'
+  );
+}
+
+interface ForecastOwnerRow {
+  owner: { id: string; name: string };
+  dealCount: number;
+  totalBaseAmount: number;
+  weightedValue: number;
+  commitBaseAmount: number;
+  bestCaseBaseAmount: number;
+  pipelineBaseAmount: number;
+}
+
+interface ForecastData {
+  baseCurrency: string;
+  totals: {
+    dealCount: number;
+    totalBaseAmount: number;
+    weightedValue: number;
+    commitBaseAmount: number;
+    bestCaseBaseAmount: number;
+    pipelineBaseAmount: number;
+  };
+  byOwner: ForecastOwnerRow[];
+  pipelines: unknown[];
+}
+
+interface PipelineData {
+  baseCurrency: string;
+  pipelines: Array<{
+    pipeline: { id: string; name: string; slug: string };
+    stages: Array<{
+      stage: { id: string; key: string; name: string; position: number };
+      open: { count: number; baseAmount: number };
+      won: { count: number; baseAmount: number };
+      lost: { count: number; baseAmount: number };
+    }>;
+  }>;
+}
+
+interface ActivityData {
+  from: string | null;
+  to: string | null;
+  total: number;
+  byType: Array<{ type: string; count: number }>;
+  byOwner: Array<{ owner: { id: string; name: string }; count: number }>;
+}
+
+interface ConversionData {
+  from: string | null;
+  to: string | null;
+  leads: {
+    total: number;
+    byStatus: Array<{ status: string; count: number }>;
+    convertedRate: number;
+  };
+  deals: { open: number; won: number; lost: number; winRate: number; avgWonBaseAmount: number };
+}
+
 function rangeBounds(query: { from?: string; to?: string }): {
   from: Date | null;
   to: Date | null;
@@ -480,6 +551,96 @@ export class ReportsService {
       query.refresh === true,
       { amountsRedacted: !showAmounts },
     );
+  }
+
+  /**
+   * CSV export (PRD 4.8 P1: printable data interchange; chart-preserving
+   * PDF stays deferred — no rendering engine is vendored). Reuses the
+   * same scoped computations as the JSON reports, so field redaction and
+   * record scoping apply identically.
+   */
+  async exportCsv(
+    auth: AuthContext,
+    name: 'forecast' | 'pipeline' | 'activity' | 'conversion',
+  ): Promise<{ filename: string; csv: string }> {
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    if (name === 'forecast') {
+      const { data } = await this.forecast(auth, {});
+      const d = data as ForecastData;
+      const rows = [
+        ['owner', 'deals', 'pipeline_amount', 'best_case_amount', 'commit_amount', 'weighted'],
+        ...d.byOwner.map((r) => [
+          r.owner.name,
+          String(r.dealCount),
+          String(r.pipelineBaseAmount),
+          String(r.bestCaseBaseAmount),
+          String(r.commitBaseAmount),
+          String(r.weightedValue),
+        ]),
+        [
+          'TOTAL',
+          String(d.totals.dealCount),
+          String(d.totals.pipelineBaseAmount),
+          String(d.totals.bestCaseBaseAmount),
+          String(d.totals.commitBaseAmount),
+          String(d.totals.weightedValue),
+        ],
+      ];
+      return { filename: `forecast-${stamp}.csv`, csv: toCsv(rows) };
+    }
+    if (name === 'pipeline') {
+      const { data } = await this.pipeline(auth, {});
+      const d = data as PipelineData;
+      const rows = [
+        [
+          'pipeline',
+          'stage',
+          'open_count',
+          'open_amount',
+          'won_count',
+          'won_amount',
+          'lost_count',
+          'lost_amount',
+        ],
+      ];
+      for (const p of d.pipelines) {
+        for (const s of p.stages) {
+          rows.push([
+            p.pipeline.name,
+            s.stage.name,
+            String(s.open.count),
+            String(s.open.baseAmount),
+            String(s.won.count),
+            String(s.won.baseAmount),
+            String(s.lost.count),
+            String(s.lost.baseAmount),
+          ]);
+        }
+      }
+      return { filename: `pipeline-${stamp}.csv`, csv: toCsv(rows) };
+    }
+    if (name === 'activity') {
+      const { data } = await this.activity(auth, {});
+      const d = data as ActivityData;
+      const rows = [['group', 'name', 'count']];
+      for (const t of d.byType) rows.push(['type', t.type, String(t.count)]);
+      for (const o of d.byOwner) rows.push(['owner', o.owner.name, String(o.count)]);
+      return { filename: `activity-${stamp}.csv`, csv: toCsv(rows) };
+    }
+    const { data } = await this.conversion(auth, {});
+    const d = data as ConversionData;
+    const rows = [
+      ['metric', 'value'],
+      ['leads_total', String(d.leads.total)],
+      ['leads_converted_rate', String(d.leads.convertedRate)],
+      ...d.leads.byStatus.map((s): string[] => [`leads_${s.status}`, String(s.count)]),
+      ['deals_open', String(d.deals.open)],
+      ['deals_won', String(d.deals.won)],
+      ['deals_lost', String(d.deals.lost)],
+      ['deals_win_rate', String(d.deals.winRate)],
+      ['deals_avg_won', String(d.deals.avgWonBaseAmount)],
+    ];
+    return { filename: `conversion-${stamp}.csv`, csv: toCsv(rows) };
   }
 
   private emptyForecast(baseCurrency: string): {

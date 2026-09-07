@@ -22,13 +22,15 @@ export const updateSettingsSchema = z
       .optional(),
     attachmentStorageCapBytes: z.number().int().min(1024).optional(),
     staleDealDays: z.number().int().min(0).max(365).optional(),
+    emailTrackingEnabled: z.boolean().optional(),
   })
   .strict()
   .refine(
     (v) =>
       v.maxAttachmentBytes !== undefined ||
       v.attachmentStorageCapBytes !== undefined ||
-      v.staleDealDays !== undefined,
+      v.staleDealDays !== undefined ||
+      v.emailTrackingEnabled !== undefined,
     {
       message: 'Provide at least one setting to update',
     },

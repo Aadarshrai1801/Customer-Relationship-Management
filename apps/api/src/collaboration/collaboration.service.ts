@@ -21,6 +21,7 @@ import type { AuthContext } from '../common/auth-context';
 import { AuditService } from '../audit/audit.service';
 import { ContactsService } from '../contacts/contacts.service';
 import { MailService } from '../mail/mail.service';
+import { NotificationPreferencesService } from '../notifications/notification-preferences.service';
 import { checkRecordAccess, hasScope } from '../rbac/permissions';
 import type {
   CreateCommentInput,
@@ -87,6 +88,8 @@ export class CollaborationService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(ContactsService) private readonly contacts: ContactsService,
     @Inject(MailService) private readonly mail: MailService,
+    @Inject(NotificationPreferencesService)
+    private readonly preferences: NotificationPreferencesService,
   ) {}
 
   async createComment(
@@ -109,15 +112,21 @@ export class CollaborationService {
         })
         .returning();
       if (!created) throw new Error('Comment insert returned no row');
+      const emailTargets: Array<{ id: string; name: string; email: string }> = [];
       for (const target of mentioned) {
-        await db.insert(notifications).values({
-          orgId: auth.org.id,
-          userId: target.id,
-          type: 'mention',
-          title: `${auth.user.name} mentioned you`,
-          body: excerpt(input.body),
-          link: this.recordLink(input.entityType, input.entityId),
-        });
+        if (await this.preferences.wantsChannel(db, auth.org.id, target.id, 'mention', 'inapp')) {
+          await db.insert(notifications).values({
+            orgId: auth.org.id,
+            userId: target.id,
+            type: 'mention',
+            title: `${auth.user.name} mentioned you`,
+            body: excerpt(input.body),
+            link: this.recordLink(input.entityType, input.entityId),
+          });
+        }
+        if (await this.preferences.wantsChannel(db, auth.org.id, target.id, 'mention', 'email')) {
+          emailTargets.push(target);
+        }
       }
       await this.audit.record(db, {
         orgId: auth.org.id,
@@ -128,7 +137,7 @@ export class CollaborationService {
         entityId: input.entityId,
         newValues: { commentId: created.id, preview: excerpt(input.body, 200) },
       });
-      notify = mentioned;
+      notify = emailTargets;
       return { comment: await this.serializeCommentById(db, auth, created.id) };
     });
     // Best-effort mention emails outside the tx: mail failure must not
@@ -216,15 +225,21 @@ export class CollaborationService {
         .where(eq(comments.id, row.id))
         .returning();
       if (!updated) throw new Error('Comment update returned no row');
+      const emailTargets: Array<{ id: string; name: string; email: string }> = [];
       for (const target of fresh) {
-        await db.insert(notifications).values({
-          orgId: auth.org.id,
-          userId: target.id,
-          type: 'mention',
-          title: `${auth.user.name} mentioned you`,
-          body: excerpt(patch.body),
-          link: this.recordLink(row.entityType as CommentEntityType, row.entityId),
-        });
+        if (await this.preferences.wantsChannel(db, auth.org.id, target.id, 'mention', 'inapp')) {
+          await db.insert(notifications).values({
+            orgId: auth.org.id,
+            userId: target.id,
+            type: 'mention',
+            title: `${auth.user.name} mentioned you`,
+            body: excerpt(patch.body),
+            link: this.recordLink(row.entityType as CommentEntityType, row.entityId),
+          });
+        }
+        if (await this.preferences.wantsChannel(db, auth.org.id, target.id, 'mention', 'email')) {
+          emailTargets.push(target);
+        }
       }
       await this.audit.record(db, {
         orgId: auth.org.id,
@@ -236,7 +251,7 @@ export class CollaborationService {
         oldValues: { commentId: row.id, preview: excerpt(row.body, 200) },
         newValues: { commentId: row.id, preview: excerpt(patch.body, 200) },
       });
-      notify = fresh;
+      notify = emailTargets;
       recordLink = this.recordLink(row.entityType as CommentEntityType, row.entityId);
       return { comment: await this.serializeCommentById(db, auth, updated.id) };
     });

@@ -1,11 +1,16 @@
 import { Module } from '@nestjs/common';
 import { ContactsModule } from '../contacts/contacts.module';
-import { EmailsController, EmailTemplatesController } from './emails.controller';
+import { SequencesModule } from '../sequences/sequences.module';
+import {
+  EmailsController,
+  EmailTemplatesController,
+  EmailTrackingController,
+} from './emails.controller';
 import { EmailsService } from './emails.service';
 
 @Module({
-  imports: [ContactsModule],
-  controllers: [EmailsController, EmailTemplatesController],
+  imports: [ContactsModule, SequencesModule],
+  controllers: [EmailsController, EmailTemplatesController, EmailTrackingController],
   providers: [EmailsService],
   exports: [EmailsService],
 })

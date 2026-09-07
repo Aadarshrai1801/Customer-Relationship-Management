@@ -21,6 +21,11 @@ export class MailService {
     return `${this.webOrigin}/reset-password`;
   }
 
+  /** Absolute base for tracking pixel/click links (API origin, not web). */
+  get trackingBaseUrl(): string {
+    return (process.env.API_URL ?? 'http://localhost:3001').split(',')[0]!;
+  }
+
   get inviteBaseUrl(): string {
     return `${this.webOrigin}/accept-invite`;
   }
@@ -78,12 +83,18 @@ export class MailService {
    * Generic rep-composed send used by the emails module. Returns the
    * provider message-id so the caller can log it for dedup.
    */
-  async sendEmail(params: { to: string; subject: string; text: string }): Promise<string> {
+  async sendEmail(params: {
+    to: string;
+    subject: string;
+    text: string;
+    html?: string;
+  }): Promise<string> {
     const info = await this.transporter.sendMail({
       from: this.from,
       to: params.to,
       subject: params.subject,
       text: params.text,
+      ...(params.html ? { html: params.html } : {}),
     });
     return typeof info?.messageId === 'string' && info.messageId
       ? info.messageId

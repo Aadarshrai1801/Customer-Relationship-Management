@@ -70,6 +70,7 @@ export const createActivitySchema = z
     subject: z.string().trim().max(200).optional(),
     body: z.string().trim().max(10000).optional(),
     occurredAt: isoDateTime.optional(),
+    durationSeconds: z.number().int().min(0).max(86400).optional(),
     ownerId: z.string().uuid().optional(),
     contactId: z.string().uuid().optional(),
     accountId: z.string().uuid().optional(),
