@@ -32,6 +32,7 @@ import {
   type FieldDefinition,
 } from '../custom-fields/field-validation';
 import { checkRecordAccess, fieldRule, filterReadableFields, hasScope } from '../rbac/permissions';
+import { WorkflowEngine } from '../workflows/workflow-engine.service';
 import type { CreateContactInput, ListContactsQuery, UpdateContactInput } from './contacts.schemas';
 
 export interface ContactWarning {
@@ -114,13 +115,14 @@ export class ContactsService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(CustomFieldsService) private readonly fields: CustomFieldsService,
     @Inject(DedupService) private readonly dedup: DedupService,
+    @Inject(WorkflowEngine) private readonly workflows: WorkflowEngine,
   ) {}
 
   async create(
     auth: AuthContext,
     input: CreateContactInput,
   ): Promise<{ contact: SerializedContact; warnings: ContactWarning[] }> {
-    return this.tenantDb.tx(auth.org.id, async (db) => {
+    const result = await this.tenantDb.tx(auth.org.id, async (db) => {
       const defs = await this.fields.loadDefinitions(db, auth.org.id, 'contact');
       const account = input.accountId
         ? await this.requireAccount(db, auth.org.id, input.accountId)
@@ -176,6 +178,19 @@ export class ContactsService {
         },
       });
       return { contact: await this.serialize(db, auth, defs, created), warnings };
+    });
+    this.emitContactCreated(auth, result.contact as unknown as Record<string, unknown>);
+    return result;
+  }
+
+  private emitContactCreated(auth: AuthContext, contact: Record<string, unknown>): void {
+    this.workflows.handle({
+      orgId: auth.org.id,
+      kind: 'record.created',
+      entity: 'contact',
+      recordId: contact['id'] as string,
+      record: contact,
+      actorUserId: auth.user.id,
     });
   }
 

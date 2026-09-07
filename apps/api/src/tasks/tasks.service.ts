@@ -21,6 +21,7 @@ import { TenantDb, type NexusDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
 import { AuditService, diffObjects } from '../audit/audit.service';
 import { ContactsService } from '../contacts/contacts.service';
+import { WorkflowEngine } from '../workflows/workflow-engine.service';
 import { checkRecordAccess, hasScope } from '../rbac/permissions';
 import type {
   CreateActivityInput,
@@ -115,10 +116,11 @@ export class TasksService {
     @Inject(TenantDb) private readonly tenantDb: TenantDb,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(ContactsService) private readonly contacts: ContactsService,
+    @Inject(WorkflowEngine) private readonly workflows: WorkflowEngine,
   ) {}
 
   async create(auth: AuthContext, input: CreateTaskInput): Promise<{ task: SerializedTask }> {
-    return this.tenantDb.tx(auth.org.id, async (db) => {
+    const result = await this.tenantDb.tx(auth.org.id, async (db) => {
       const ownerId = await this.resolveOwnerForCreate(db, auth, input.ownerId);
       const links = await this.resolveLinks(db, auth.org.id, input);
       const [created] = await db
@@ -150,6 +152,15 @@ export class TasksService {
       });
       return { task: await this.serializeById(db, auth, created.id) };
     });
+    this.workflows.handle({
+      orgId: auth.org.id,
+      kind: 'record.created',
+      entity: 'task',
+      recordId: result.task.id,
+      record: result.task as unknown as Record<string, unknown>,
+      actorUserId: auth.user.id,
+    });
+    return result;
   }
 
   async list(
@@ -225,7 +236,8 @@ export class TasksService {
     id: string,
     patch: UpdateTaskInput,
   ): Promise<{ task: SerializedTask }> {
-    return this.tenantDb.tx(auth.org.id, async (db) => {
+    let emitChanges: Array<{ field: string; old: unknown; new: unknown }> = [];
+    const result = await this.tenantDb.tx(auth.org.id, async (db) => {
       const row = await this.requireLiveTask(db, auth.org.id, id);
       this.assertTaskReadable(auth, row.ownerId);
 
@@ -302,8 +314,41 @@ export class TasksService {
       if (!wasCompleted && nowCompleted) {
         await this.logCompletionActivity(db, auth, updated.id, updated);
       }
+      const beforeScalars: Record<string, unknown> = {
+        title: row.title,
+        description: row.description,
+        status: row.status,
+        priority: row.priority,
+        ownerId: row.ownerId,
+      };
+      const afterScalars: Record<string, unknown> = {
+        title: updated.title,
+        description: updated.description,
+        status: updated.status,
+        priority: updated.priority,
+        ownerId: updated.ownerId,
+      };
+      emitChanges = Object.keys(afterScalars)
+        .filter((field) => (beforeScalars[field] ?? null) !== (afterScalars[field] ?? null))
+        .map((field) => ({
+          field,
+          old: beforeScalars[field] ?? null,
+          new: afterScalars[field] ?? null,
+        }));
       return { task: await this.serializeById(db, auth, updated.id) };
     });
+    if (emitChanges.length > 0) {
+      this.workflows.handle({
+        orgId: auth.org.id,
+        kind: 'field.changed',
+        entity: 'task',
+        recordId: result.task.id,
+        record: result.task as unknown as Record<string, unknown>,
+        changes: emitChanges,
+        actorUserId: auth.user.id,
+      });
+    }
+    return result;
   }
 
   /**

@@ -33,6 +33,7 @@ import {
 } from '../custom-fields/field-validation';
 import { checkRecordAccess, fieldRule, filterReadableFields, hasScope } from '../rbac/permissions';
 import { PipelinesService } from '../pipelines/pipelines.service';
+import { WorkflowEngine } from '../workflows/workflow-engine.service';
 import { convertToBaseCurrency, resolveBaseCurrency } from '../pipelines/currency';
 import type {
   AddLineItemInput,
@@ -135,10 +136,11 @@ export class DealsService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(CustomFieldsService) private readonly fields: CustomFieldsService,
     @Inject(PipelinesService) private readonly pipelines: PipelinesService,
+    @Inject(WorkflowEngine) private readonly workflows: WorkflowEngine,
   ) {}
 
   async create(auth: AuthContext, input: CreateDealInput): Promise<{ deal: SerializedDeal }> {
-    return this.tenantDb.tx(auth.org.id, async (db) => {
+    const result = await this.tenantDb.tx(auth.org.id, async (db) => {
       const defs = await this.fields.loadDefinitions(db, auth.org.id, 'deal');
       const { pipeline, stage } = await this.resolveStageForCreate(db, auth.org.id, input);
       const account = input.accountId
@@ -250,6 +252,29 @@ export class DealsService {
         ),
       };
     });
+    this.emitDealEvent(auth, 'record.created', result.deal);
+    return result;
+  }
+
+  private emitDealEvent(
+    auth: AuthContext,
+    kind: 'record.created' | 'field.changed' | 'stage.changed',
+    deal: SerializedDeal,
+    extra?: {
+      changes?: Array<{ field: string; old: unknown; new: unknown }>;
+      details?: Record<string, unknown>;
+    },
+  ): void {
+    this.workflows.handle({
+      orgId: auth.org.id,
+      kind,
+      entity: 'deal',
+      recordId: deal.id,
+      record: deal as unknown as Record<string, unknown>,
+      changes: extra?.changes,
+      details: extra?.details,
+      actorUserId: auth.user.id,
+    });
   }
 
   async list(
@@ -352,7 +377,8 @@ export class DealsService {
     id: string,
     patch: UpdateDealInput,
   ): Promise<{ deal: SerializedDeal }> {
-    return this.tenantDb.tx(auth.org.id, async (db) => {
+    let emitChanges: Array<{ field: string; old: unknown; new: unknown }> = [];
+    const result = await this.tenantDb.tx(auth.org.id, async (db) => {
       const defs = await this.fields.loadDefinitions(db, auth.org.id, 'deal');
       const row = await this.requireLiveDeal(db, auth.org.id, id);
       this.assertDealReadable(auth, row.deal.ownerId);
@@ -479,6 +505,11 @@ export class DealsService {
         ...after,
         expectedCloseDate: after.expectedCloseDate?.toISOString() ?? null,
       });
+      emitChanges = Object.keys(newValues).map((field) => ({
+        field,
+        old: (oldValues as Record<string, unknown>)[field] ?? null,
+        new: (newValues as Record<string, unknown>)[field] ?? null,
+      }));
       const customDiff = diffObjects(
         (row.deal.customFields ?? {}) as Record<string, unknown>,
         (updated.customFields ?? {}) as Record<string, unknown>,
@@ -501,6 +532,10 @@ export class DealsService {
       }
       return { deal: await this.serializeById(db, auth, defs, updated.id) };
     });
+    if (emitChanges.length > 0) {
+      this.emitDealEvent(auth, 'field.changed', result.deal, { changes: emitChanges });
+    }
+    return result;
   }
 
   async remove(auth: AuthContext, id: string): Promise<{ ok: true }> {
@@ -532,7 +567,7 @@ export class DealsService {
     id: string,
     input: { stageId: string; lossReason?: string },
   ): Promise<{ deal: SerializedDeal; changed: boolean }> {
-    return this.tenantDb.tx(auth.org.id, async (db) => {
+    const result = await this.tenantDb.tx(auth.org.id, async (db) => {
       const defs = await this.fields.loadDefinitions(db, auth.org.id, 'deal');
       const row = await this.requireLiveDeal(db, auth.org.id, id);
       this.assertDealReadable(auth, row.deal.ownerId);
@@ -641,6 +676,12 @@ export class DealsService {
       });
       return { deal: await this.serializeById(db, auth, defs, updated.id), changed: true };
     });
+    if (result.changed) {
+      this.emitDealEvent(auth, 'stage.changed', result.deal, {
+        details: { toStageId: result.deal.stage.id, toStageKey: result.deal.stage.key },
+      });
+    }
+    return result;
   }
 
   /**
