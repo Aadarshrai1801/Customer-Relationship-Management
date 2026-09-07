@@ -290,6 +290,38 @@ export interface SerializedActivity {
   externalId: string | null;
   syncStatus: string;
   conflictFlag: boolean;
+  direction: string;
+  senderEmail: string | null;
+  recipientEmails: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SerializedEmailActivity {
+  id: string;
+  owner: { id: string; name: string } | null;
+  ownerId: string | null;
+  contact: { id: string; name: string } | null;
+  account: { id: string; name: string } | null;
+  deal: { id: string; name: string } | null;
+  subject: string | null;
+  body: string | null;
+  occurredAt: string;
+  direction: string;
+  senderEmail: string | null;
+  recipientEmails: string[];
+  provider: string | null;
+  externalId: string | null;
+  syncStatus: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EmailTemplate {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
   createdAt: string;
   updatedAt: string;
 }
