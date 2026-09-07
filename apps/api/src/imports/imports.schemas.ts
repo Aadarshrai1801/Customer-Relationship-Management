@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const uploadQuerySchema = z
   .object({
     entityType: z.enum(['contact', 'account']).default('contact'),
+    source: z.enum(['hubspot', 'pipedrive', 'salesforce']).optional(),
   })
   .strict();
 

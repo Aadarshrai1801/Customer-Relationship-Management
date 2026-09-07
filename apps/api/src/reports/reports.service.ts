@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, eq, gte, isNull, lt } from 'drizzle-orm';
+import { and, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 import {
   activities,
   contactNotes,
@@ -545,6 +545,100 @@ export class ReportsService {
                   : round2((won.length / (won.length + lost.length)) * 100),
               avgWonBaseAmount: won.length === 0 ? 0 : round2(wonBase / won.length),
             },
+          };
+        });
+      },
+      query.refresh === true,
+      { amountsRedacted: !showAmounts },
+    );
+  }
+
+  /**
+   * Cohort & trend analysis (PRD 4.8 P2): contacts grouped by creation
+   * month with lifecycle progression, plus weekly deal flow. Scoping
+   * follows contact/deal record access like the other reports.
+   */
+  async cohorts(
+    auth: AuthContext,
+    query: { refresh?: boolean },
+  ): Promise<{ data: unknown; meta: { cached: boolean; generatedAt: string } }> {
+    const showAmounts = this.dealAmountsVisible(auth);
+    return this.cached(
+      auth,
+      ['cohorts', query],
+      async () => {
+        return this.tenantDb.tx(auth.org.id, async (db) => {
+          const contactScopeAll = this.scopeAll(auth, 'contact');
+          const dealScopeAll = this.scopeAll(auth, 'deal');
+          const contactRows = await db
+            .select({
+              month: sql<string>`to_char(${contacts.createdAt}, 'YYYY-MM')`,
+              lifecycleStage: contacts.lifecycleStage,
+              count: sql<number>`count(*)::int`,
+            })
+            .from(contacts)
+            .where(
+              and(
+                eq(contacts.orgId, auth.org.id),
+                isNull(contacts.deletedAt),
+                ...(contactScopeAll ? [] : [eq(contacts.ownerId, auth.user.id)]),
+              ),
+            )
+            .groupBy(sql`to_char(${contacts.createdAt}, 'YYYY-MM')`, contacts.lifecycleStage)
+            .orderBy(sql`to_char(${contacts.createdAt}, 'YYYY-MM')`);
+          const cohorts = new Map<
+            string,
+            { cohort: string; size: number; byLifecycle: Record<string, number> }
+          >();
+          for (const row of contactRows) {
+            const entry = cohorts.get(row.month) ?? { cohort: row.month, size: 0, byLifecycle: {} };
+            entry.size += row.count;
+            entry.byLifecycle[row.lifecycleStage] =
+              (entry.byLifecycle[row.lifecycleStage] ?? 0) + row.count;
+            cohorts.set(row.month, entry);
+          }
+          const dealRows = await db
+            .select({
+              week: sql<string>`to_char(date_trunc('week', ${deals.createdAt}), 'YYYY-MM-DD')`,
+              status: deals.status,
+              count: sql<number>`count(*)::int`,
+              amount: sql<number>`coalesce(sum(${deals.baseAmount}), 0)::float8`,
+            })
+            .from(deals)
+            .where(
+              and(
+                eq(deals.orgId, auth.org.id),
+                isNull(deals.deletedAt),
+                ...(dealScopeAll ? [] : [eq(deals.ownerId, auth.user.id)]),
+              ),
+            )
+            .groupBy(
+              sql`to_char(date_trunc('week', ${deals.createdAt}), 'YYYY-MM-DD')`,
+              deals.status,
+            )
+            .orderBy(sql`to_char(date_trunc('week', ${deals.createdAt}), 'YYYY-MM-DD')`);
+          const weeks = new Map<
+            string,
+            { week: string; created: number; won: number; wonBaseAmount: number }
+          >();
+          for (const row of dealRows) {
+            const entry = weeks.get(row.week) ?? {
+              week: row.week,
+              created: 0,
+              won: 0,
+              wonBaseAmount: 0,
+            };
+            entry.created += row.count;
+            if (row.status === 'won') {
+              entry.won += row.count;
+              // Field-level redaction (PRD 4.12): counts survive, money zeroes.
+              entry.wonBaseAmount = round2(entry.wonBaseAmount + (showAmounts ? row.amount : 0));
+            }
+            weeks.set(row.week, entry);
+          }
+          return {
+            cohorts: [...cohorts.values()],
+            weeklyTrend: [...weeks.values()],
           };
         });
       },

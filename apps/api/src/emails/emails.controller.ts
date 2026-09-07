@@ -84,6 +84,21 @@ export class EmailsController {
   async tracking(@Req() req: Request, @Param('id') id: string): Promise<unknown> {
     return this.emails.trackingSummary(authOf(req), id);
   }
+
+  @RequireScopes('activities:read')
+  @Get('inbox/list')
+  async inbox(
+    @Req() req: Request,
+    @Query(new ZodValidationPipe(suggestionsQuerySchema)) query: unknown,
+  ): Promise<unknown> {
+    return this.emails.listInbox(authOf(req), query as SuggestionsQuery);
+  }
+
+  @RequireScopes('activities:manage')
+  @Post('inbox/:id/claim')
+  async claim(@Req() req: Request, @Param('id') id: string): Promise<unknown> {
+    return this.emails.claimInboxMessage(authOf(req), id);
+  }
 }
 
 @Controller('email-templates')

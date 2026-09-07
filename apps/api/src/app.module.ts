@@ -23,6 +23,11 @@ import { TasksModule } from './tasks/tasks.module';
 import { SequencesModule } from './sequences/sequences.module';
 import { EmailsModule } from './emails/emails.module';
 import { QuotesModule } from './quotes/quotes.module';
+import { SchedulingModule } from './scheduling/scheduling.module';
+import { ApprovalsModule } from './approvals/approvals.module';
+import { TerritoriesModule } from './territories/territories.module';
+import { SlaModule } from './sla/sla.module';
+import { InboundModule } from './inbound/inbound.module';
 import { ReportsModule } from './reports/reports.module';
 import { CollaborationModule } from './collaboration/collaboration.module';
 import { WorkflowsModule } from './workflows/workflows.module';
@@ -60,6 +65,11 @@ import { HealthController } from './health/health.controller';
     SequencesModule,
     EmailsModule,
     QuotesModule,
+    SchedulingModule,
+    ApprovalsModule,
+    TerritoriesModule,
+    SlaModule,
+    InboundModule,
     ReportsModule,
     CollaborationModule,
     WorkflowsModule,

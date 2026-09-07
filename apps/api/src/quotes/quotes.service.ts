@@ -13,6 +13,7 @@ import { TenantDb, IdentityDb, type NexusDb } from '../database/tenant-db.servic
 import type { AuthContext } from '../common/auth-context';
 import { AuditService } from '../audit/audit.service';
 import { MailService } from '../mail/mail.service';
+import { ApprovalsService } from '../approvals/approvals.service';
 import { checkRecordAccess } from '../rbac/permissions';
 import type { AcceptQuoteInput, CreateQuoteInput, DeclineQuoteInput } from './quotes.schemas';
 
@@ -58,6 +59,7 @@ export class QuotesService {
     @Inject(IdentityDb) private readonly identity: IdentityDb,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(MailService) private readonly mail: MailService,
+    @Inject(ApprovalsService) private readonly approvals: ApprovalsService,
   ) {}
 
   /**
@@ -173,6 +175,16 @@ export class QuotesService {
       await this.requireReadableDeal(db, auth, row.dealId);
       if (row.status !== 'draft') {
         throw new ConflictException({ message: 'Only drafts can be sent', code: 'QUOTE_LOCKED' });
+      }
+      // High-discount quotes need an approved quote_discount approval
+      // (the one enforced automation in V1; see approvals module).
+      const subtotal = toNumber(row.subtotal);
+      const discountRatio = subtotal > 0 ? toNumber(row.discountTotal) / subtotal : 0;
+      if (discountRatio > 0.2 && !(await this.approvals.hasApprovedDiscount(db, auth.org.id, row.id))) {
+        throw new ForbiddenException({
+          message: 'Discounts over 20% require an approved quote_discount approval',
+          code: 'APPROVAL_REQUIRED',
+        });
       }
       const recipient = to ?? (await this.dealContactEmail(db, auth.org.id, row.dealId)) ?? null;
       if (!recipient) {

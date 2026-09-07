@@ -40,6 +40,10 @@ export const conversionReportQuerySchema = z
   })
   .strict();
 
+export const refreshQuerySchema = z
+  .object({ refresh: boolString })
+  .strict();
+
 export type ForecastReportQuery = z.infer<typeof forecastReportQuerySchema>;
 export type PipelineReportQuery = z.infer<typeof pipelineReportQuerySchema>;
 export type ActivityReportQuery = z.infer<typeof activityReportQuerySchema>;

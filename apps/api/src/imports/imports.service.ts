@@ -114,7 +114,7 @@ export function suggestMapping(
   entityType: 'contact' | 'account',
   customKeys: string[],
 ): Record<string, string> {
-  const mapping: Record<string, string> = {};
+  const mapping: Record<string, unknown> = {};
   const standard = entityType === 'contact' ? STANDARD_CONTACT_FIELDS : STANDARD_ACCOUNT_FIELDS;
   for (const header of headers) {
     const normalized = normalizeHeader(header);
@@ -126,8 +126,59 @@ export function suggestMapping(
     const custom = customKeys.find((k) => normalizeHeader(k) === normalized);
     if (custom) mapping[header] = custom;
   }
-  return mapping;
+  return mapping as Record<string, string>;
 }
+
+/**
+ * Module 14 (PRD 4.15 P0): field-mapping presets for common source
+ * systems. Keys are the exact CSV headers those exports produce; values
+ * are Nexus field keys. Applied when upload passes ?source=, and always
+ * overridable afterwards via setMapping.
+ */
+export const SOURCE_MAPPING_TEMPLATES: Record<
+  string,
+  { source: string; entityType: 'contact' | 'account'; mapping: Record<string, string> }
+> = {
+  hubspot: {
+    source: 'hubspot',
+    entityType: 'contact',
+    mapping: {
+      'First Name': 'firstName',
+      'Last Name': 'lastName',
+      'Email': 'email',
+      'Phone Number': 'phone',
+      'Job Title': 'title',
+      'Company Name': 'accountName',
+      'Contact Owner': 'ownerEmail',
+      'Lifecycle Stage': 'lifecycleStage',
+    },
+  },
+  pipedrive: {
+    source: 'pipedrive',
+    entityType: 'contact',
+    mapping: {
+      'Name': 'name',
+      'Email': 'email',
+      'Phone': 'phone',
+      'Title': 'title',
+      'Organization': 'accountName',
+      'Owner': 'ownerEmail',
+    },
+  },
+  salesforce: {
+    source: 'salesforce',
+    entityType: 'contact',
+    mapping: {
+      'FirstName': 'firstName',
+      'LastName': 'lastName',
+      'Email': 'email',
+      'Phone': 'phone',
+      'Title': 'title',
+      'Account Name': 'accountName',
+      'Contact Owner': 'ownerEmail',
+    },
+  },
+};
 
 export interface RowIssue {
   row: number;
@@ -172,6 +223,7 @@ export class ImportsService {
     auth: AuthContext,
     entityType: 'contact' | 'account',
     file: UploadedFile | undefined,
+    source?: 'hubspot' | 'pipedrive' | 'salesforce',
   ): Promise<unknown> {
     this.assertManage(auth, entityType);
     if (!file) {
@@ -225,6 +277,7 @@ export class ImportsService {
           rows.length,
           rows.slice(0, 10),
           true,
+          source,
         );
       }
       await rename(file.path, target);
@@ -251,6 +304,7 @@ export class ImportsService {
         inspected.totalRows,
         inspected.sampleRows,
         false,
+        source,
       );
     } catch (err) {
       if ((err as { status?: number }).status === 400) throw err;
@@ -283,16 +337,28 @@ export class ImportsService {
     totalRows: number,
     sampleRows: Array<Record<string, string>>,
     fixedMapping: boolean,
+    source?: 'hubspot' | 'pipedrive' | 'salesforce',
   ): Promise<unknown> {
     const created = await this.tenantDb.tx(auth.org.id, async (db) => {
       const defs = await this.fields.loadDefinitions(db, auth.org.id, entityType);
-      const mapping = fixedMapping
+      const suggested = fixedMapping
         ? Object.fromEntries(headers.map((h) => [h, h]))
         : suggestMapping(
             headers,
             entityType,
             defs.map((d) => d.key),
           );
+      // Source presets win for known headers; suggestions fill the rest.
+      const preset = source ? SOURCE_MAPPING_TEMPLATES[source] : undefined;
+      const mapping =
+        preset && preset.entityType === entityType
+          ? {
+              ...suggested,
+              ...Object.fromEntries(
+                Object.entries(preset.mapping).filter(([header]) => headers.includes(header)),
+              ),
+            }
+          : suggested;
       const [row] = await db
         .insert(importJobs)
         .values({

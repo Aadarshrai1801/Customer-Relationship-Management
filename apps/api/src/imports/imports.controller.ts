@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import type { Request } from 'express';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { ImportsService, type UploadedFile as ServiceFile } from './imports.service';
+import { SOURCE_MAPPING_TEMPLATES } from './imports.service';
 import {
   mappingSchema,
   uploadQuerySchema,
@@ -67,8 +68,13 @@ export class ImportsController {
     @UploadedFile() file: Express.Multer.File | undefined,
     @Query(new ZodValidationPipe(uploadQuerySchema)) query: unknown,
   ): Promise<unknown> {
-    const { entityType } = query as UploadQuery;
-    return this.imports.upload(authOf(req), entityType, file as ServiceFile | undefined);
+    const { entityType, source } = query as UploadQuery;
+    return this.imports.upload(authOf(req), entityType, file as ServiceFile | undefined, source);
+  }
+
+  @Get('mapping-templates')
+  async templates(): Promise<unknown> {
+    return Object.values(SOURCE_MAPPING_TEMPLATES);
   }
 
   @Get()

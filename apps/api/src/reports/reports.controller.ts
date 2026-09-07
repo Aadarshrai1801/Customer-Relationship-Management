@@ -24,6 +24,7 @@ import {
   conversionReportQuerySchema,
   forecastReportQuerySchema,
   pipelineReportQuerySchema,
+  refreshQuerySchema,
   type ActivityReportQuery,
   type ConversionReportQuery,
   type ForecastReportQuery,
@@ -86,6 +87,15 @@ export class ReportsController {
     @Query(new ZodValidationPipe(conversionReportQuerySchema)) query: unknown,
   ): Promise<unknown> {
     return this.reports.conversion(authOf(req), query as ConversionReportQuery);
+  }
+
+  @RequireScopes('reports:read')
+  @Get('cohorts')
+  async cohorts(
+    @Req() req: Request,
+    @Query(new ZodValidationPipe(refreshQuerySchema)) query: unknown,
+  ): Promise<unknown> {
+    return this.reports.cohorts(authOf(req), query as { refresh?: boolean });
   }
 
   @RequireScopes('reports:read')

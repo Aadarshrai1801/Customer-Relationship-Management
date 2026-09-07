@@ -74,6 +74,12 @@ export class ContactsController {
   }
 
   @RequireScopes('contacts:manage')
+  @Post(':id/enrich')
+  async enrich(@Req() req: Request, @Param('id') id: string): Promise<unknown> {
+    return this.contacts.enrich(authOf(req), id);
+  }
+
+  @RequireScopes('contacts:manage')
   @Get(':id/merge-preview')
   async mergePreview(
     @Req() req: Request,

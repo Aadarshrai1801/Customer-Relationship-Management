@@ -21,6 +21,7 @@ import type { AuthContext } from '../common/auth-context';
 import { AuditService } from '../audit/audit.service';
 import { ContactsService } from '../contacts/contacts.service';
 import { MailService } from '../mail/mail.service';
+import { DevicesService } from '../notifications/devices.service';
 import { NotificationPreferencesService } from '../notifications/notification-preferences.service';
 import { checkRecordAccess, hasScope } from '../rbac/permissions';
 import type {
@@ -88,8 +89,8 @@ export class CollaborationService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(ContactsService) private readonly contacts: ContactsService,
     @Inject(MailService) private readonly mail: MailService,
-    @Inject(NotificationPreferencesService)
-    private readonly preferences: NotificationPreferencesService,
+    @Inject(NotificationPreferencesService) private readonly preferences: NotificationPreferencesService,
+    @Inject(DevicesService) private readonly devices: DevicesService,
   ) {}
 
   async createComment(
@@ -152,6 +153,13 @@ export class CollaborationService {
       } catch {
         // Mention email is advisory; the in-app notification persists.
       }
+      await this.devices.pushToUserId(
+        auth.org.id,
+        target.id,
+        'mention',
+        `${auth.user.name} mentioned you`,
+        excerpt(input.body),
+      );
     }
     return result;
   }
@@ -265,6 +273,13 @@ export class CollaborationService {
       } catch {
         // Advisory only.
       }
+      await this.devices.pushToUserId(
+        auth.org.id,
+        target.id,
+        'mention',
+        `${auth.user.name} mentioned you`,
+        excerpt(result.comment.body),
+      );
     }
     return result;
   }

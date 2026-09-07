@@ -22,6 +22,7 @@ import type { AuthContext } from '../common/auth-context';
 import { AuditService, diffObjects } from '../audit/audit.service';
 import { ContactsService } from '../contacts/contacts.service';
 import { MailService } from '../mail/mail.service';
+import { DevicesService } from '../notifications/devices.service';
 import { NotificationPreferencesService } from '../notifications/notification-preferences.service';
 import { WorkflowEngine } from '../workflows/workflow-engine.service';
 import { checkRecordAccess, hasScope } from '../rbac/permissions';
@@ -160,6 +161,7 @@ export class TasksService {
     @Inject(ContactsService) private readonly contacts: ContactsService,
     @Inject(WorkflowEngine) private readonly workflows: WorkflowEngine,
     @Inject(MailService) private readonly mail: MailService,
+    @Inject(DevicesService) private readonly devices: DevicesService,
     @Inject(NotificationPreferencesService)
     private readonly preferences: NotificationPreferencesService,
   ) {}
@@ -519,13 +521,14 @@ export class TasksService {
     const result = await this.tenantDb.tx(auth.org.id, async (db) => {
       return this.dispatchDigestsForOrg(db, auth.org.id, nowInput ?? new Date(), auth);
     });
-    await this.sendDigestEmails(result.emailTargets);
+    await this.sendDigestEmails(auth.org.id, result.emailTargets);
     return { ownersNotified: result.ownersNotified, tasksIncluded: result.tasksIncluded };
   }
 
   /** Best-effort post-commit digest emails (skipped silently on failure). */
   async sendDigestEmails(
-    targets: Array<{ email: string; name: string; lines: string[]; count: number }>,
+    orgId: string,
+    targets: Array<{ userId: string; email: string; name: string; lines: string[]; count: number }>,
   ): Promise<void> {
     for (const target of targets) {
       try {
@@ -537,6 +540,13 @@ export class TasksService {
       } catch {
         // Advisory only.
       }
+      await this.devices.pushToUserId(
+        orgId,
+        target.userId,
+        'task_digest',
+        `Daily task digest: ${target.count} tasks`,
+        target.lines.slice(0, 3).join('\n'),
+      );
     }
   }
 
@@ -549,7 +559,7 @@ export class TasksService {
   ): Promise<{
     ownersNotified: number;
     tasksIncluded: number;
-    emailTargets: Array<{ email: string; name: string; lines: string[]; count: number }>;
+    emailTargets: Array<{ userId: string; email: string; name: string; lines: string[]; count: number }>;
   }> {
     const todayStart = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
@@ -586,7 +596,7 @@ export class TasksService {
       byOwner.set(ownerId, group);
     }
     // Digest emails (PRD 4.16 P1) go out post-commit, best-effort.
-    const emailTargets: Array<{ email: string; name: string; lines: string[]; count: number }> = [];
+    const emailTargets: Array<{ userId: string; email: string; name: string; lines: string[]; count: number }> = [];
     for (const [ownerId, group] of byOwner) {
       const lines = group.items.map((t) => {
         const due = t.dueAt ? `due ${t.dueAt.toISOString().slice(0, 10)}` : 'reminder due';
@@ -609,6 +619,7 @@ export class TasksService {
         (await this.preferences.wantsChannel(db, orgId, ownerId, 'task_digest', 'email'))
       ) {
         emailTargets.push({
+          userId: ownerId,
           email: group.email,
           name: group.name,
           lines,

@@ -4,11 +4,16 @@ import { notificationPreferences } from '@nexus/db';
 import { TenantDb, type NexusDb } from '../database/tenant-db.service';
 import type { AuthContext } from '../common/auth-context';
 
-export const NOTIFICATION_CHANNELS = ['inapp', 'email'] as const;
+export const NOTIFICATION_CHANNELS = ['inapp', 'email', 'push'] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 
 /** Types the preference center knows; unknown types are still storable. */
-export const KNOWN_NOTIFICATION_TYPES = ['mention', 'task_digest', 'lead_assigned'] as const;
+export const KNOWN_NOTIFICATION_TYPES = [
+  'mention',
+  'task_digest',
+  'lead_assigned',
+  'approval_requested',
+] as const;
 
 const typePattern = /^[a-z_]{1,60}$/;
 
@@ -46,7 +51,7 @@ export class NotificationPreferencesService {
       channels.some((c) => !(NOTIFICATION_CHANNELS as readonly string[]).includes(c))
     ) {
       throw new BadRequestException({
-        message: 'Channels must be a non-empty subset of inapp, email',
+        message: 'Channels must be a non-empty subset of inapp, email, push',
         code: 'INVALID_CHANNELS',
       });
     }

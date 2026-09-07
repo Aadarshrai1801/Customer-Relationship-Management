@@ -230,8 +230,7 @@ export class EmailsService {
   async listSuggestions(
     auth: AuthContext,
     query: { limit?: number; cursor?: string },
-  ): Promise<{ suggestions: SerializedEmailActivity[]; nextCursor: string | null }> {
-    return this.tenantDb.tx(auth.org.id, async (db) => {
+  ): Promise<{ suggestions: SerializedEmailActivity[]; nextCursor: string | null }> {    return this.tenantDb.tx(auth.org.id, async (db) => {
       const limit = Math.min(Math.max(query.limit ?? 50, 1), 200);
       const conditions = [
         eq(activities.orgId, auth.org.id),
@@ -272,6 +271,92 @@ export class EmailsService {
           ? `${last.activity.occurredAt.toISOString()}|${last.activity.id}`
           : null;
       return { suggestions: serialized, nextCursor };
+    });
+  }
+
+  /**
+   * Shared team inbox (PRD 4.5 P2): every inbound email regardless of
+   * owner, so the team can triage one queue. Claiming assigns
+   * ownership to the caller.
+   */
+  async listInbox(
+    auth: AuthContext,
+    query: { limit?: number; cursor?: string },
+  ): Promise<{ messages: SerializedEmailActivity[]; nextCursor: string | null }> {
+    return this.tenantDb.tx(auth.org.id, async (db) => {
+      const limit = Math.min(Math.max(query.limit ?? 50, 1), 200);
+      const conditions = [
+        eq(activities.orgId, auth.org.id),
+        eq(activities.type, 'email'),
+        eq(activities.direction, 'inbound'),
+      ];
+      if (query.cursor) {
+        const parsed = parseCursor(query.cursor);
+        if (!parsed) {
+          throw new BadRequestException({
+            message: 'Invalid pagination cursor',
+            code: 'INVALID_CURSOR',
+          });
+        }
+        conditions.push(
+          sql`(${activities.occurredAt}, ${activities.id}) < (${parsed.time}, ${parsed.id}::uuid)`,
+        );
+      }
+      const rows = await db
+        .select({ activity: activities, owner: users })
+        .from(activities)
+        .leftJoin(users, eq(activities.ownerId, users.id))
+        .where(and(...conditions))
+        .orderBy(desc(activities.occurredAt), desc(activities.id))
+        .limit(limit + 1);
+      const page = rows.slice(0, limit);
+      const serialized = await Promise.all(
+        page.map((row) => this.serializeEmail(db, row.activity, row.owner)),
+      );
+      const last = page[page.length - 1];
+      const nextCursor =
+        rows.length > limit && last
+          ? `${last.activity.occurredAt.toISOString()}|${last.activity.id}`
+          : null;
+      return { messages: serialized, nextCursor };
+    });
+  }
+
+  async claimInboxMessage(auth: AuthContext, id: string): Promise<{ activity: SerializedEmailActivity }> {
+    return this.tenantDb.tx(auth.org.id, async (db) => {
+      // Claimable by any activities:manage holder (route scope), even
+      // when the message currently belongs to someone else — that is
+      // the point of a shared queue.
+      const [row] = await db
+        .select({ activity: activities, owner: users })
+        .from(activities)
+        .leftJoin(users, eq(activities.ownerId, users.id))
+        .where(
+          and(
+            eq(activities.id, id),
+            eq(activities.orgId, auth.org.id),
+            eq(activities.type, 'email'),
+          ),
+        );
+      if (!row) {
+        throw new NotFoundException({ message: 'Email not found', code: 'EMAIL_NOT_FOUND' });
+      }
+      const [updated] = await db
+        .update(activities)
+        .set({ ownerId: auth.user.id, updatedAt: new Date() })
+        .where(eq(activities.id, id))
+        .returning();
+      if (!updated) throw new Error('Claim update returned no row');
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: 'activity.updated',
+        entityType: 'activity',
+        entityId: id,
+        newValues: { ownerId: auth.user.id, claimed: true },
+      });
+      return { activity: await this.serializeEmail(db, updated, { id: auth.user.id, name: auth.user.name }) };
     });
   }
 

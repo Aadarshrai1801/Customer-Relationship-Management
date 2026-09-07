@@ -263,6 +263,99 @@ export class ContactsService {
     });
   }
 
+  /**
+   * Data enrichment (PRD 4.2 P2, deterministic slice): links the contact
+   * to a matching account derived from the email domain (creating it when
+   * absent) and tags the record as enriched. Never overwrites
+   * human-entered values; free-mail domains are skipped.
+   */
+  async enrich(
+    auth: AuthContext,
+    id: string,
+  ): Promise<{
+    contact: SerializedContact;
+    warnings: ContactWarning[];
+    applied: Record<string, string>;
+  }> {
+    const FREE_PROVIDERS = new Set([
+      'gmail.com',
+      'yahoo.com',
+      'hotmail.com',
+      'outlook.com',
+      'icloud.com',
+      'aol.com',
+      'proton.me',
+      'protonmail.com',
+    ]);
+    return this.tenantDb.tx(auth.org.id, async (db) => {
+      const defs = await this.fields.loadDefinitions(db, auth.org.id, 'contact');
+      const row = await this.findLive(db, auth.org.id, id);
+      if (!row) {
+        throw new NotFoundException({ message: 'Contact not found', code: 'CONTACT_NOT_FOUND' });
+      }
+      this.assertReadable(auth, row.contact.ownerId);
+      const applied: Record<string, string> = {};
+      let accountId = row.contact.accountId;
+      if (!accountId) {
+        const domain = row.contact.email.toLowerCase().split('@')[1] ?? '';
+        const root = domain.split('.')[0] ?? '';
+        if (domain && root && !FREE_PROVIDERS.has(domain)) {
+          const company = root.charAt(0).toUpperCase() + root.slice(1);
+          const [existingAccount] = await db
+            .select({ id: accounts.id })
+            .from(accounts)
+            .where(
+              and(
+                eq(accounts.orgId, auth.org.id),
+                sql`lower(${accounts.name}) = ${company.toLowerCase()}`,
+                isNull(accounts.deletedAt),
+              ),
+            );
+          if (existingAccount) {
+            accountId = existingAccount.id;
+          } else {
+            const [createdAccount] = await db
+              .insert(accounts)
+              .values({ orgId: auth.org.id, ownerId: row.contact.ownerId, name: company })
+              .returning();
+            if (!createdAccount) throw new Error('Enrichment account insert returned no row');
+            accountId = createdAccount.id;
+          }
+          applied['accountId'] = accountId;
+        }
+      }
+      const tags = [...(row.contact.tags ?? [])];
+      if (!tags.includes('enriched')) {
+        tags.push('enriched');
+        applied['tags'] = 'enriched';
+      }
+      if (Object.keys(applied).length === 0) {
+        return {
+          contact: await this.serialize(db, auth, defs, row.contact),
+          warnings: [],
+          applied,
+        };
+      }
+      const [updated] = await db
+        .update(contacts)
+        .set({ accountId, tags, updatedAt: new Date() })
+        .where(eq(contacts.id, row.contact.id))
+        .returning();
+      if (!updated) throw new Error('Enrichment update returned no row');
+      await this.audit.record(db, {
+        orgId: auth.org.id,
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email,
+        action: 'contact.enriched',
+        entityType: 'contact',
+        entityId: updated.id,
+        newValues: applied,
+      });
+      const contact = await this.serialize(db, auth, defs, updated);
+      return { contact, warnings: [], applied };
+    });
+  }
+
   async update(
     auth: AuthContext,
     id: string,

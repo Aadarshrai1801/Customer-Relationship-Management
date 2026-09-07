@@ -27,6 +27,8 @@ export interface OrganizationSettings {
   staleDealDays?: number;
   /** Module 13 (PRD 4.5 P1): open/click tracking toggle (default true). */
   emailTrackingEnabled?: boolean;
+  /** Module 14 (PRD 4.9 P1): HMAC secret for generic inbound webhooks. */
+  inboundWebhookSecret?: string;
 }
 
 export interface OrganizationSecuritySettings {
@@ -321,6 +323,155 @@ export type EmailTrackingEvent = typeof emailTrackingEvents.$inferSelect;
 export type Sequence = typeof sequences.$inferSelect;
 export type SequenceEnrollment = typeof sequenceEnrollments.$inferSelect;
 export type Quote = typeof quotes.$inferSelect;
+export type BookingLink = typeof bookingLinks.$inferSelect;
+export type Booking = typeof bookings.$inferSelect;
+export type Approval = typeof approvals.$inferSelect;
+export type Territory = typeof territories.$inferSelect;
+export type Device = typeof devices.$inferSelect;
+export type SlaPolicy = typeof slaPolicies.$inferSelect;
+
+/**
+ * Module 14 (PRD 4.4 P1): bookable meeting links. Availability is derived
+ * from existing bookings (working hours 9–17 UTC); no external calendar
+ * needed. Public booking resolves through the slug.
+ */
+export const bookingLinks = pgTable(
+  'booking_links',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(),
+    durationMinutes: integer('duration_minutes').notNull().default(30),
+    description: text('description'),
+    isActive: boolean('is_active').notNull().default(true),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uq_booking_links_org_slug').on(t.orgId, t.slug)],
+);
+
+export const bookings = pgTable(
+  'bookings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    linkId: uuid('link_id')
+      .notNull()
+      .references(() => bookingLinks.id, { onDelete: 'cascade' }),
+    contactId: uuid('contact_id').references(() => contacts.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    email: text('email').notNull(),
+    startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
+    endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
+    status: text('status').notNull().default('scheduled'),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_bookings_link_start').on(t.orgId, t.linkId, t.startsAt)],
+);
+
+/**
+ * Module 14 (PRD 4.9 P1): generic approval requests. Enforcement hooks
+ * live in domain services (e.g. high-discount quotes); the object itself
+ * is entity-agnostic: { entityType, entityId, action, payload }.
+ */
+export const approvals = pgTable(
+  'approvals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    requesterId: uuid('requester_id').references(() => users.id, { onDelete: 'set null' }),
+    decidedById: uuid('decided_by_id').references(() => users.id, { onDelete: 'set null' }),
+    entityType: text('entity_type').notNull(),
+    entityId: uuid('entity_id').notNull(),
+    action: text('action').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+    status: text('status').notNull().default('pending'),
+    reason: text('reason'),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_approvals_org_status').on(t.orgId, t.status, t.createdAt)],
+);
+
+/**
+ * Module 14 (PRD 4.12 P1): territories match contacts/leads by rule and
+ * suggest an assignee. Rules: [{ field, operator, value }] over the
+ * record's flat fields plus derived email_domain.
+ */
+export const territories = pgTable(
+  'territories',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    rules: jsonb('rules').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uq_territories_org_name').on(t.orgId, t.name)],
+);
+
+/**
+ * Module 14 (PRD 4.16 P1): push device registrations. Delivery runs
+ * through PushProvider (stub until FCM/APNs keys exist); registration
+ * and channel routing are fully functional.
+ */
+export const devices = pgTable(
+  'devices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    token: text('token').notNull(),
+    platform: text('platform').notNull().default('web'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uq_devices_org_token').on(t.orgId, t.token)],
+);
+
+/**
+ * Module 14 (PRD 4.4 P2): SLA policies evaluated on demand.
+ * metric: first_response (first engagement after create) or resolution
+ * (converted/closed/completed). entity: lead | deal | task.
+ */
+export const slaPolicies = pgTable(
+  'sla_policies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    entity: text('entity').notNull(),
+    metric: text('metric').notNull(),
+    hours: integer('hours').notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_sla_org_active').on(t.orgId, t.isActive)],
+);
 
 /**
  * Module 13 (PRD 4.16 P1): per-user channel preferences per notification
