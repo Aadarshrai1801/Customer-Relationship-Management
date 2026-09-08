@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from './database/database.module';
+import { StorageModule } from './storage/storage.module';
 import { CryptoModule } from './crypto/crypto.module';
 import { AuditModule } from './audit/audit.module';
 import { QueueModule } from './queue/queue.module';
@@ -42,6 +43,7 @@ import { HealthController } from './health/health.controller';
 @Module({
   imports: [
     DatabaseModule,
+    StorageModule,
     CryptoModule,
     AuditModule,
     QueueModule,

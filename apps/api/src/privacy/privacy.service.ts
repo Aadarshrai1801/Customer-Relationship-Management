@@ -7,8 +7,6 @@ import {
 } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
 import {
   auditLogEntries,
   emailInvites,
@@ -20,6 +18,7 @@ import {
   users,
 } from '@nexus/db';
 import { IdentityDb, TenantDb } from '../database/tenant-db.service';
+import { StorageService } from '../storage/storage.service';
 import type { AuthContext } from '../common/auth-context';
 import { AuditService } from '../audit/audit.service';
 import { PasswordService } from '../crypto/password.service';
@@ -34,8 +33,8 @@ function exportTtlDays(): number {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 7;
 }
 
-function storageDir(): string {
-  return resolve(process.env.STORAGE_DIR ?? 'storage');
+function exportKey(storageKey: string): string {
+  return `exports/${storageKey}`;
 }
 
 export interface ExportPackage {
@@ -84,6 +83,7 @@ export class PrivacyService {
     @Inject(PasswordService) private readonly passwords: PasswordService,
     @Inject(MailService) private readonly mail: MailService,
     @Inject(QueueService) private readonly queues: QueueService,
+    @Inject(StorageService) private readonly storage: StorageService,
   ) {}
 
   onModuleInit(): void {
@@ -136,7 +136,7 @@ export class PrivacyService {
   async loadExportFile(
     auth: AuthContext,
     id: string,
-  ): Promise<{ path: string; filename: string; size: number }> {
+  ): Promise<{ path?: string; buffer?: Buffer; filename: string; size: number }> {
     const row = await this.tenantDb.tx(auth.org.id, async (db) => {
       const [found] = await db
         .select()
@@ -162,8 +162,13 @@ export class PrivacyService {
         code: 'EXPORT_NOT_READY',
       });
     }
-    const path = join(storageDir(), 'exports', row.storageKey);
-    const bytes = await readFile(path).catch(() => null);
+    const key = exportKey(row.storageKey);
+    let bytes: Buffer | null = null;
+    try {
+      bytes = (await this.storage.read(key)).buffer;
+    } catch {
+      bytes = null;
+    }
     if (!bytes) {
       throw new NotFoundException({
         message: 'Export file is missing',
@@ -177,7 +182,14 @@ export class PrivacyService {
         code: 'EXPORT_CHECKSUM_MISMATCH',
       });
     }
-    return { path, filename: `nexus-export-${row.id}.json`, size: bytes.length };
+    if (this.storage.activeDriver === 'local') {
+      return {
+        path: this.storage.localPathFor(key),
+        filename: `nexus-export-${row.id}.json`,
+        size: bytes.length,
+      };
+    }
+    return { buffer: bytes, filename: `nexus-export-${row.id}.json`, size: bytes.length };
   }
 
   /**
@@ -260,7 +272,7 @@ export class PrivacyService {
       return exportRows.map((r) => r.storageKey).filter((k): k is string => !!k);
     });
     for (const key of files) {
-      await unlink(join(storageDir(), 'exports', key)).catch(() => undefined);
+      await this.storage.delete(exportKey(key));
     }
     return { ok: true as const };
   }
@@ -278,10 +290,8 @@ export class PrivacyService {
     try {
       const pkg = await this.buildPackage(found.orgId, found.userId);
       const storageKey = `${exportId}.json`;
-      const dir = join(storageDir(), 'exports');
-      await mkdir(dir, { recursive: true });
       const bytes = Buffer.from(JSON.stringify(pkg, null, 2), 'utf8');
-      await writeFile(join(dir, storageKey), bytes);
+      await this.storage.save(exportKey(storageKey), bytes);
       const checksum = createHash('sha256').update(bytes).digest('hex');
       const expiresAt = new Date(Date.now() + exportTtlDays() * 24 * 60 * 60 * 1000);
       await this.tenantDb.tx(found.orgId, async (db) => {
@@ -329,7 +339,7 @@ export class PrivacyService {
         db.update(gdprExports).set({ status: 'expired' }).where(eq(gdprExports.id, row.id)),
       );
       if (row.storageKey) {
-        await unlink(join(storageDir(), 'exports', row.storageKey)).catch(() => undefined);
+        await this.storage.delete(exportKey(row.storageKey));
       }
       expired += 1;
     }

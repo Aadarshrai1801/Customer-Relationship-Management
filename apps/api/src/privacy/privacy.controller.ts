@@ -47,7 +47,11 @@ export class PrivacyController {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
     res.setHeader('Content-Length', String(file.size));
-    createReadStream(file.path).pipe(res);
+    if (file.buffer) {
+      res.send(file.buffer);
+      return;
+    }
+    createReadStream(file.path as string).pipe(res);
   }
 
   @Post('erase')

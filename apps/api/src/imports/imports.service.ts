@@ -8,11 +8,11 @@ import {
 } from '@nestjs/common';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { mkdir, readFile, rename, unlink } from 'node:fs/promises';
+import { join } from 'node:path';
 import { accounts, contacts, importJobs, organizations, users, type ImportJob } from '@nexus/db';
 import { IdentityDb, TenantDb, type NexusDb } from '../database/tenant-db.service';
+import { StorageService } from '../storage/storage.service';
 import type { AuthContext } from '../common/auth-context';
 import { AuditService } from '../audit/audit.service';
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
@@ -39,12 +39,8 @@ export interface UploadedFile {
   path: string;
 }
 
-function storageDir(): string {
-  return resolve(process.env.STORAGE_DIR ?? 'storage');
-}
-
-function importPath(jobId: string): string {
-  return join(storageDir(), 'imports', `${jobId}.csv`);
+function importKey(jobId: string): string {
+  return `imports/${jobId}.csv`;
 }
 
 const STANDARD_CONTACT_FIELDS = new Set([
@@ -145,7 +141,7 @@ export const SOURCE_MAPPING_TEMPLATES: Record<
     mapping: {
       'First Name': 'firstName',
       'Last Name': 'lastName',
-      'Email': 'email',
+      Email: 'email',
       'Phone Number': 'phone',
       'Job Title': 'title',
       'Company Name': 'accountName',
@@ -157,23 +153,23 @@ export const SOURCE_MAPPING_TEMPLATES: Record<
     source: 'pipedrive',
     entityType: 'contact',
     mapping: {
-      'Name': 'name',
-      'Email': 'email',
-      'Phone': 'phone',
-      'Title': 'title',
-      'Organization': 'accountName',
-      'Owner': 'ownerEmail',
+      Name: 'name',
+      Email: 'email',
+      Phone: 'phone',
+      Title: 'title',
+      Organization: 'accountName',
+      Owner: 'ownerEmail',
     },
   },
   salesforce: {
     source: 'salesforce',
     entityType: 'contact',
     mapping: {
-      'FirstName': 'firstName',
-      'LastName': 'lastName',
-      'Email': 'email',
-      'Phone': 'phone',
-      'Title': 'title',
+      FirstName: 'firstName',
+      LastName: 'lastName',
+      Email: 'email',
+      Phone: 'phone',
+      Title: 'title',
       'Account Name': 'accountName',
       'Contact Owner': 'ownerEmail',
     },
@@ -195,6 +191,7 @@ export class ImportsService {
     @Inject(DedupService) private readonly dedup: DedupService,
     @Inject(MailService) private readonly mail: MailService,
     @Inject(QueueService) private readonly queues: QueueService,
+    @Inject(StorageService) private readonly storage: StorageService,
   ) {}
 
   onModuleInit(): void {
@@ -258,8 +255,8 @@ export class ImportsService {
     }
 
     const jobId = randomUUID();
-    const target = importPath(jobId);
-    await mkdir(join(storageDir(), 'imports'), { recursive: true });
+    const key = importKey(jobId);
+    let staged: { path: string; cleanup: () => Promise<void> } | null = null;
     try {
       if (isVcf) {
         const text = await readFile(file.path, 'utf8');
@@ -267,7 +264,7 @@ export class ImportsService {
         if (cards.length === 0) throw new Error('No vCards found in file');
         if (cards.length > MAX_ROWS) throw new Error(`File exceeds the ${MAX_ROWS}-row limit`);
         const { headers, rows } = vcfToRows(cards);
-        await this.writeCsv(target, headers, rows);
+        await this.saveCsv(key, headers, rows);
         await unlink(file.path).catch(() => undefined);
         return this.createJob(
           auth,
@@ -280,23 +277,32 @@ export class ImportsService {
           source,
         );
       }
-      await rename(file.path, target);
-      const inspected = await inspectCsv(target);
+      if (this.storage.activeDriver === 'local') {
+        const target = this.storage.localPathFor(key);
+        await mkdir(join(target, '..'), { recursive: true });
+        await rename(file.path, target);
+      } else {
+        // Cloud object storage has no filesystem rename: persist the bytes,
+        // then stream from a temp copy for header inspection below.
+        const bytes = await readFile(file.path);
+        await this.storage.save(key, bytes);
+        await unlink(file.path).catch(() => undefined);
+      }
+      staged = await this.storage.materializeToLocalPath(key);
+      const inspected = await inspectCsv(staged.path);
       if (inspected.totalRows === 0) {
-        await unlink(target).catch(() => undefined);
         throw new BadRequestException({
           message: 'File contains no data rows',
           code: 'FILE_EMPTY',
         });
       }
       if (inspected.totalRows > MAX_ROWS) {
-        await unlink(target).catch(() => undefined);
         throw new BadRequestException({
           message: `File exceeds the ${MAX_ROWS}-row limit`,
           code: 'FILE_TOO_MANY_ROWS',
         });
       }
-      return this.createJob(
+      const created = await this.createJob(
         auth,
         entityType,
         jobId,
@@ -306,10 +312,14 @@ export class ImportsService {
         false,
         source,
       );
+      await staged.cleanup();
+      staged = null;
+      return created;
     } catch (err) {
-      if ((err as { status?: number }).status === 400) throw err;
-      await unlink(target).catch(() => undefined);
+      if (staged) await staged.cleanup().catch(() => undefined);
+      await this.storage.delete(key);
       await unlink(file.path).catch(() => undefined);
+      if ((err as { status?: number }).status === 400) throw err;
       throw new BadRequestException({
         message: err instanceof Error ? err.message : 'Could not parse file',
         code: 'FILE_PARSE_FAILED',
@@ -317,8 +327,8 @@ export class ImportsService {
     }
   }
 
-  private async writeCsv(
-    path: string,
+  private async saveCsv(
+    key: string,
     headers: string[],
     rows: Array<Record<string, string>>,
   ): Promise<void> {
@@ -326,7 +336,7 @@ export class ImportsService {
       headers.map(escapeCsvCell).join(','),
       ...rows.map((row) => headers.map((h) => escapeCsvCell(row[h] ?? '')).join(',')),
     ];
-    await writeFile(path, lines.join('\n'), 'utf8');
+    await this.storage.save(key, Buffer.from(lines.join('\n'), 'utf8'));
   }
 
   private async createJob(
@@ -536,8 +546,9 @@ export class ImportsService {
       .where(eq(importJobs.id, jobId));
     const job = found[0];
     if (!job || (job.status !== 'validating' && job.status !== 'pending')) return;
+    const { path, cleanup } = await this.storage.materializeToLocalPath(importKey(job.id));
     try {
-      const stats = await this.validateAllRows(job);
+      const stats = await this.validateAllRows(job, path);
       const failed = stats.invalid > 0;
       await this.tenantDb.tx(job.orgId, (db) =>
         db
@@ -556,18 +567,22 @@ export class ImportsService {
           .set({ status: 'failed', error: (err as Error).message.slice(0, 500) })
           .where(eq(importJobs.id, job.id)),
       );
+    } finally {
+      await cleanup();
     }
   }
 
-  private async validateAllRows(job: ImportJob): Promise<{
+  private async validateAllRows(
+    job: ImportJob,
+    csvPath: string,
+  ): Promise<{
     valid: number;
     invalid: number;
     sampleErrors: RowIssue[];
   }> {
     const mapping = (job.mapping ?? {}) as Record<string, string>;
-    const path = importPath(job.id);
-    if (!existsSync(path)) throw new Error('Import file is missing');
-    const inspected = await inspectCsv(path);
+    if (!(await this.storage.exists(importKey(job.id)))) throw new Error('Import file is missing');
+    const inspected = await inspectCsv(csvPath);
     const defs = await this.tenantDb.tx(job.orgId, (db) =>
       this.fields.loadDefinitions(db, job.orgId, job.entityType),
     );
@@ -575,7 +590,7 @@ export class ImportsService {
     let valid = 0;
     let invalid = 0;
     const sampleErrors: RowIssue[] = [];
-    for await (const { index, row } of iterateRows(path, inspected.delimiter)) {
+    for await (const { index, row } of iterateRows(csvPath, inspected.delimiter)) {
       const issues = this.validateRow(job.entityType, mapping, defs, members, row);
       if (issues.length === 0) valid += 1;
       else {
@@ -695,8 +710,9 @@ export class ImportsService {
       .where(eq(importJobs.id, jobId));
     const job = found[0];
     if (!job || job.status !== 'importing') return;
+    const { path, cleanup } = await this.storage.materializeToLocalPath(importKey(job.id));
     try {
-      const stats = await this.commitAllRows(job);
+      const stats = await this.commitAllRows(job, path);
       await this.tenantDb.tx(job.orgId, async (db) => {
         await db
           .update(importJobs)
@@ -726,7 +742,7 @@ export class ImportsService {
           total: stats.total,
         });
       }
-      await unlink(importPath(job.id)).catch(() => undefined);
+      await this.storage.delete(importKey(job.id));
     } catch (err) {
       await this.tenantDb.tx(job.orgId, (db) =>
         db
@@ -734,6 +750,8 @@ export class ImportsService {
           .set({ status: 'failed', error: (err as Error).message.slice(0, 500) })
           .where(eq(importJobs.id, job.id)),
       );
+    } finally {
+      await cleanup();
     }
   }
 
@@ -754,7 +772,10 @@ export class ImportsService {
     return org?.name ?? 'your workspace';
   }
 
-  private async commitAllRows(job: ImportJob): Promise<{
+  private async commitAllRows(
+    job: ImportJob,
+    csvPath: string,
+  ): Promise<{
     total: number;
     created: number;
     skipped: number;
@@ -763,9 +784,7 @@ export class ImportsService {
     accountsCreated: number;
   }> {
     const mapping = (job.mapping ?? {}) as Record<string, string>;
-    const path = importPath(job.id);
-    if (!existsSync(path)) throw new Error('Import file is missing');
-    const inspected = await inspectCsv(path);
+    const inspected = await inspectCsv(csvPath);
     const defs = await this.tenantDb.tx(job.orgId, (db) =>
       this.fields.loadDefinitions(db, job.orgId, job.entityType),
     );
@@ -776,7 +795,7 @@ export class ImportsService {
     let accountsCreated = 0;
     let accountMap = new Map<string, string>();
     if (job.entityType === 'contact') {
-      accountMap = await this.ensureAccounts(job.orgId, mapping, inspected.delimiter, path);
+      accountMap = await this.ensureAccounts(job.orgId, mapping, inspected.delimiter, csvPath);
       const created = accountMap.get('__created__');
       accountsCreated = created ? Number(created) : 0;
       accountMap.delete('__created__');
@@ -827,7 +846,7 @@ export class ImportsService {
         batch = [];
         await flushProgress();
       };
-      for await (const { row } of iterateRows(path, inspected.delimiter)) {
+      for await (const { row } of iterateRows(csvPath, inspected.delimiter)) {
         const issues = this.validateRow(job.entityType, mapping, defs, memberEmails, row);
         if (issues.length > 0) {
           skipped += 1;
@@ -849,7 +868,7 @@ export class ImportsService {
         batch = [];
         await flushProgress();
       };
-      for await (const { row } of iterateRows(path, inspected.delimiter)) {
+      for await (const { row } of iterateRows(csvPath, inspected.delimiter)) {
         const issues = this.validateRow(job.entityType, mapping, defs, memberEmails, row);
         if (issues.length > 0) {
           skipped += 1;

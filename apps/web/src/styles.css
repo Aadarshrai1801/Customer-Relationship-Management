@@ -1,50 +1,68 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&display=swap');
 @import 'tailwindcss';
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Nexus design tokens (PRD 5.4). Semantic colors are CSS variables so light
- * and dark mode share the same utility classes with full parity.
+ * Nexus design tokens (PRD 5.4) — modern clean-SaaS refresh.
+ * Semantic colors are CSS variables so light and dark mode share
+ * the same utility classes with full parity.
  */
 :root {
   --surface: #ffffff;
-  --surface-raised: #f6f7f9;
-  --surface-sunken: #eef0f3;
-  --border: #dfe3e8;
-  --border-strong: #c4ccd4;
-  --text-primary: #16191d;
-  --text-secondary: #5b6470;
+  --surface-raised: #f8fafc;
+  --surface-sunken: #eef2f7;
+  --surface-overlay: #ffffff;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text-primary: #0f172a;
+  --text-secondary: #5b6b82;
+  --text-tertiary: #8a97ab;
   --text-inverse: #ffffff;
-  --accent: #2456e6;
-  --accent-hover: #1a44c4;
-  --accent-soft: #e8eefc;
-  --success: #18794e;
-  --success-soft: #e6f4ec;
-  --warning: #9a5b00;
-  --warning-soft: #fdf1de;
-  --danger: #c4322b;
-  --danger-soft: #fbe9e7;
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-active: #3730a3;
+  --accent-soft: #eef2ff;
+  --accent-ring: rgb(79 70 229 / 0.25);
+  --success: #047857;
+  --success-soft: #e6f6ef;
+  --warning: #b45309;
+  --warning-soft: #fdf3e3;
+  --danger: #dc2626;
+  --danger-soft: #fdecec;
+  --sidebar: #fbfcfe;
+  --sidebar-active: #eef2ff;
   color-scheme: light;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
 }
 
 .dark {
-  --surface: #14171c;
-  --surface-raised: #1c2128;
-  --surface-sunken: #242b33;
-  --border: #2e3640;
-  --border-strong: #454f5b;
-  --text-primary: #eef1f4;
-  --text-secondary: #a7b0bc;
-  --text-inverse: #16191d;
-  --accent: #6b8afd;
-  --accent-hover: #8aa3fd;
-  --accent-soft: #232c4d;
-  --success: #4cc38a;
-  --success-soft: #173b2a;
-  --warning: #e5a13d;
-  --warning-soft: #42300f;
-  --danger: #f26d63;
-  --danger-soft: #46201d;
+  --surface: #0e1219;
+  --surface-raised: #151b26;
+  --surface-sunken: #1d2534;
+  --surface-overlay: #171e2b;
+  --border: #232d40;
+  --border-strong: #35415a;
+  --text-primary: #eef2f9;
+  --text-secondary: #9aa7bd;
+  --text-tertiary: #6b7a93;
+  --text-inverse: #0e1219;
+  --accent: #818cf8;
+  --accent-hover: #a5b4fc;
+  --accent-active: #c7d2fe;
+  --accent-soft: #1e2447;
+  --accent-ring: rgb(129 140 248 / 0.3);
+  --success: #34d399;
+  --success-soft: #10382a;
+  --warning: #fbbf24;
+  --warning-soft: #3d2c0d;
+  --danger: #f87171;
+  --danger-soft: #421d1d;
+  --sidebar: #0b0f16;
+  --sidebar-active: #1e2447;
   color-scheme: dark;
 }
 
@@ -52,13 +70,16 @@
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
   --color-surface-sunken: var(--surface-sunken);
+  --color-surface-overlay: var(--surface-overlay);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
   --color-text-inverse: var(--text-inverse);
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
+  --color-accent-active: var(--accent-active);
   --color-accent-soft: var(--accent-soft);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
@@ -66,33 +87,122 @@
   --color-warning-soft: var(--warning-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-active: var(--sidebar-active);
 
-  /* PRD type scale: 12/14/16/20/24/32/40px, single family. */
+  /* PRD type scale: 12/14/16/20/24/32/40px, Inter single family. */
   --font-sans:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
   --text-3xl: 2rem;
   --text-3xl--line-height: 2.5rem;
   --text-4xl: 2.5rem;
   --text-4xl--line-height: 3rem;
 
-  /* 3-tier elevation. */
-  --shadow-subtle: 0 1px 2px rgb(0 0 0 / 0.06);
-  --shadow-medium: 0 4px 12px rgb(0 0 0 / 0.1);
-  --shadow-prominent: 0 12px 32px rgb(0 0 0 / 0.18);
+  /* 3-tier elevation, softer modern shadows. */
+  --shadow-subtle: 0 1px 2px rgb(15 23 42 / 0.05), 0 1px 3px rgb(15 23 42 / 0.06);
+  --shadow-medium: 0 1px 2px rgb(15 23 42 / 0.05), 0 8px 24px -8px rgb(15 23 42 / 0.14);
+  --shadow-prominent: 0 1px 2px rgb(15 23 42 / 0.06), 0 20px 48px -12px rgb(15 23 42 / 0.25);
+}
+
+html {
+  text-rendering: optimizeLegibility;
 }
 
 body {
-  background-color: var(--surface);
+  background-color: var(--surface-raised);
+  background-image: radial-gradient(1200px 320px at 50% -80px, var(--accent-soft), transparent 70%);
+  background-attachment: fixed;
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 0.875rem;
-  line-height: 1.5;
+  line-height: 1.55;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   -webkit-font-smoothing: antialiased;
+}
+
+.dark body {
+  background-image: radial-gradient(
+    1100px 300px at 50% -100px,
+    rgb(129 140 248 / 0.12),
+    transparent 70%
+  );
+}
+
+::selection {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Refined scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* Visible keyboard focus everywhere (WCAG 2.1 AA). */
 :where(a, button, input, select, textarea, [tabindex]):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: 6px;
+  box-shadow: 0 0 0 4px var(--accent-ring);
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: -0.02em;
+}
+
+/* Entrance motion */
+@keyframes nexus-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes nexus-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes nexus-shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+
+.animate-enter {
+  animation: nexus-rise 0.28s ease-out both;
+}
+
+.animate-pop {
+  animation: nexus-pop 0.18s ease-out both;
 }

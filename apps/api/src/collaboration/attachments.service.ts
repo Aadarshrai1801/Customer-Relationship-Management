@@ -6,11 +6,11 @@ import {
   PayloadTooLargeException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { and, eq, isNull, sum } from 'drizzle-orm';
 import { attachments, organizations } from '@nexus/db';
 import { TenantDb, type NexusDb } from '../database/tenant-db.service';
+import { StorageService } from '../storage/storage.service';
 import type { AuthContext } from '../common/auth-context';
 import { AuditService } from '../audit/audit.service';
 import { CollaborationService, type CommentEntityType } from './collaboration.service';
@@ -86,6 +86,7 @@ export class AttachmentsService {
     @Inject(TenantDb) private readonly tenantDb: TenantDb,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(CollaborationService) private readonly collaboration: CollaborationService,
+    @Inject(StorageService) private readonly storage: StorageService,
   ) {}
 
   async upload(
@@ -118,9 +119,7 @@ export class AttachmentsService {
         tooLarge('Workspace attachment storage cap reached', 'STORAGE_CAP_EXCEEDED');
       }
       const storageKey = `${auth.org.id}/${randomUUID()}-${sanitizeFilename(file.originalname)}`;
-      const dest = join(storageRoot(), storageKey);
-      await fs.mkdir(join(storageRoot(), auth.org.id), { recursive: true });
-      await fs.writeFile(dest, file.buffer);
+      await this.storage.save(join('attachments', storageKey).replace(/\\/g, '/'), file.buffer);
       const [created] = await db
         .insert(attachments)
         .values({
@@ -135,7 +134,7 @@ export class AttachmentsService {
         })
         .returning();
       if (!created) {
-        await fs.unlink(dest).catch(() => undefined);
+        await this.storage.delete(join('attachments', storageKey).replace(/\\/g, '/'));
         throw new Error('Attachment insert returned no row');
       }
       await this.audit.record(db, {
@@ -163,25 +162,46 @@ export class AttachmentsService {
   async downloadPath(
     auth: AuthContext,
     id: string,
-  ): Promise<{ path: string; filename: string; mimeType: string; size: number }> {
+  ): Promise<{
+    path?: string;
+    buffer?: Buffer;
+    filename: string;
+    mimeType: string;
+    size: number;
+  }> {
     return this.tenantDb.tx(auth.org.id, async (db) => {
       const { attachment } = await this.collaboration.serializeAttachmentById(db, auth, id);
-      const path = join(storageRoot(), attachment.storageKey);
+      const key = join('attachments', attachment.storageKey).replace(/\\/g, '/');
+      if (this.storage.activeDriver === 'local') {
+        const path = join(storageRoot(), attachment.storageKey);
+        const exists = await this.storage.exists(key);
+        if (!exists) {
+          throw new NotFoundException({
+            message: 'Attachment file is missing from storage',
+            code: 'FILE_MISSING_FROM_STORAGE',
+          });
+        }
+        return {
+          path,
+          filename: attachment.filename,
+          mimeType: attachment.mimeType,
+          size: attachment.sizeBytes,
+        };
+      }
       try {
-        const stat = await fs.stat(path);
-        if (!stat.isFile()) throw new Error('not a file');
+        const { buffer } = await this.storage.read(key);
+        return {
+          buffer,
+          filename: attachment.filename,
+          mimeType: attachment.mimeType,
+          size: attachment.sizeBytes,
+        };
       } catch {
         throw new NotFoundException({
           message: 'Attachment file is missing from storage',
           code: 'FILE_MISSING_FROM_STORAGE',
         });
       }
-      return {
-        path,
-        filename: attachment.filename,
-        mimeType: attachment.mimeType,
-        size: attachment.sizeBytes,
-      };
     });
   }
 
@@ -204,7 +224,7 @@ export class AttachmentsService {
       return attachment.storageKey;
     });
     // Best effort: quota accounting already excludes the soft-deleted row.
-    await fs.unlink(join(storageRoot(), storageKey)).catch(() => undefined);
+    await this.storage.delete(join('attachments', storageKey).replace(/\\/g, '/'));
     return { ok: true as const };
   }
 

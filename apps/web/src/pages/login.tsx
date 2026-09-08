@@ -211,8 +211,8 @@ export function SsoSignIn(): React.JSX.Element {
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface-raised p-4">
-      <p className="text-sm font-medium">Single sign-on</p>
+    <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-surface-raised p-4">
+      <p className="text-[13px] font-semibold text-text-primary">Single sign-on</p>
       <div className="flex gap-2">
         <Input
           aria-label="Work email for SSO lookup"
@@ -256,18 +256,83 @@ function apiBase(): string {
 
 export function AuthLayout({
   title,
+  subtitle,
   children,
 }: {
   title: string;
+  subtitle?: string;
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-6 px-4 py-12">
-      <div>
-        <p className="text-sm font-semibold text-accent">Nexus CRM</p>
-        <h1 className="mt-1 text-3xl font-semibold">{title}</h1>
+    <main className="grid min-h-screen w-full lg:grid-cols-[1.05fr_1fr]">
+      {/* Brand panel */}
+      <div className="relative hidden overflow-hidden bg-[#12101f] text-white lg:flex lg:flex-col lg:justify-between lg:p-10">
+        <div
+          aria-hidden
+          className="absolute inset-0 bg-gradient-to-br from-[#4f46e5] via-[#6d28d9] to-[#0ea5e9] opacity-90"
+        />
+        <div
+          aria-hidden
+          className="absolute -top-24 -right-24 h-96 w-96 rounded-full bg-white/15 blur-3xl"
+        />
+        <div
+          aria-hidden
+          className="absolute -bottom-32 -left-16 h-[420px] w-[420px] rounded-full bg-[#22d3ee]/25 blur-3xl"
+        />
+        <div className="relative flex items-center gap-2.5">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/95 text-lg font-extrabold text-[#4338ca] shadow-lg">
+            N
+          </span>
+          <span className="text-[17px] font-bold tracking-tight">Nexus CRM</span>
+        </div>
+        <div className="relative max-w-md">
+          <p className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-white/10 px-3 py-1 text-[11px] font-bold tracking-[0.08em] uppercase backdrop-blur">
+            ✦ The CRM reps actually use
+          </p>
+          <h2 className="mt-4 text-4xl leading-[1.1] font-bold tracking-tight">
+            Pipeline, inbox & reports — in one calm workspace.
+          </h2>
+          <ul className="mt-6 flex flex-col gap-3 text-sm text-white/85">
+            {[
+              ['⌘K', 'Command palette for everything'],
+              ['◈', 'Kanban pipeline with drag & drop'],
+              ['◐', 'Full dark mode parity'],
+            ].map(([icon, text]) => (
+              <li key={text} className="flex items-center gap-2.5">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/12 text-sm backdrop-blur">
+                  {icon}
+                </span>
+                {text}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <p className="relative text-xs text-white/60">
+          Trusted by revenue teams · SSO, audit logs & RBAC built in
+        </p>
       </div>
-      {children}
+
+      {/* Form column */}
+      <div className="flex items-center justify-center bg-surface-raised px-4 py-10 sm:px-8">
+        <div className="animate-enter w-full max-w-[420px]">
+          <div className="mb-6 flex items-center gap-2.5 lg:hidden">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#6366f1] to-[#4338ca] text-lg font-extrabold text-white shadow-md">
+              N
+            </span>
+            <span className="text-[15px] font-bold tracking-tight text-text-primary">
+              Nexus CRM
+            </span>
+          </div>
+          <div className="rounded-2xl border border-border bg-surface p-6 shadow-medium sm:p-8">
+            <h1 className="text-[24px] font-bold tracking-tight text-text-primary">{title}</h1>
+            {subtitle && <p className="mt-1.5 text-sm text-text-secondary">{subtitle}</p>}
+            <div className="mt-6">{children}</div>
+          </div>
+          <p className="mt-5 text-center text-xs text-text-tertiary">
+            Protected by SSO, 2FA & audit logging
+          </p>
+        </div>
+      </div>
     </main>
   );
 }
